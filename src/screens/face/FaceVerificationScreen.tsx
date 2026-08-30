@@ -29,7 +29,7 @@ const ENROLLMENT_STEPS = [
   { index: 3, labelEn: "Turn your head slightly RIGHT", labelBn: "সামান্য ডানে তাকান" },
 ];
 
-export default function FaceRegisterScreen({ navigation }: { navigation: any }) {
+export default function FaceVerificationScreen({ navigation }: { navigation: any }) {
   const { user, refreshProfile } = useAuth();
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>("front");
@@ -152,30 +152,45 @@ export default function FaceRegisterScreen({ navigation }: { navigation: any }) 
           setIsProcessing(false);
           startProgressiveEnrollment(stepNum + 1, updated);
         } else {
+          // Finalize enrollment and then verify the captured face
           await finalizeEnrollment(updated);
+
+          // Aggregate embeddings to a descriptor for verification
+          const aggregatedDescriptor = aggregateEmbeddings(updated);
+          try {
+            const verification = await attendanceService.verifyFace(undefined, aggregatedDescriptor);
+            if (!verification.matched) {
+              Alert.alert("Verification Failed", verification.message);
+              // Reset enrollment state to allow retry
+              setCollectedEmbeddings([]);
+              setCurrentStepIndex(1);
+              setIsProcessing(false);
+              setIsCompleted(false);
+              return;
+            }
+          } catch (verErr: any) {
+            Alert.alert("Verification Error", verErr?.message || "Failed to verify face.");
+            // Reset state on error
+            setCollectedEmbeddings([]);
+            setCurrentStepIndex(1);
+            setIsProcessing(false);
+            setIsCompleted(false);
+            return;
+          }
         }
       } catch (err: any) {
         setIsProcessing(false);
         setErrorMessage(err.message || "Capture failed. Please adjust lighting and face camera.");
       }
-    }, 1400);
+    }, 1000);
   };
 
-  const finalizeEnrollment = async (samples: number[][]) => {
+  const finalizeEnrollment = async (embeddings: number[][]) => {
     try {
-      const { valid } = filterConsistentEmbeddings(samples, 0.40);
-      const masterTemplate = aggregateEmbeddings(valid.length > 0 ? valid : samples);
-
-      // ব্যাকএন্ড ও লোকাল ডাটাবেজে সেভ
-      await faceApi.registerFace({
+      const descriptor = aggregateEmbeddings(embeddings);
+      await attendanceService.enrollFace({
         employeeId,
-        embedding: masterTemplate,
-        sampleCount: samples.length,
-      }).catch(() => {});
-
-      await attendanceService.saveRegisteredFace({
-        registered: true,
-        faceDescriptor: masterTemplate,
+        descriptor,
         registeredAt: new Date().toISOString(),
       });
 
