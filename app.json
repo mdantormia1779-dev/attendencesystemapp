@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Smart Attendance",
+    "slug": "smartattendance-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Smart Attendance to access camera."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Smart Attendance to use location."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#00B050"
+        }
+      ]
+    ],
+
+    "android": {
+      "package": "com.smartattendance.employee",
+      "useCleartextTraffic": true,
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+
+    "ios": {
+      "bundleIdentifier": "com.smartattendance.employee"
+    }
+  }
+}
