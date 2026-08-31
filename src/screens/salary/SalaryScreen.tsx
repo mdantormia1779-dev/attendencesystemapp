@@ -89,32 +89,32 @@ export default function SalaryScreen({ navigation }: { navigation: any }) {
             <Text style={styles.highlightPeriod}>
               {latest.month} {latest.year}
             </Text>
-            <Text style={styles.highlightAmount}>৳{latest.netPayable.toLocaleString()}</Text>
+            <Text style={styles.highlightAmount}>${latest.netPayable.toLocaleString()}</Text>
             <Text style={styles.highlightSub}>Net Take-Home Pay (Bank Direct Deposit)</Text>
 
             <View style={styles.breakdownBox}>
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>Basic Salary</Text>
-                <Text style={styles.breakdownVal}>৳{latest.basicSalary.toLocaleString()}</Text>
+                <Text style={styles.breakdownVal}>${latest.basicSalary.toLocaleString()}</Text>
               </View>
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>House & Medical Allowances</Text>
                 <Text style={styles.breakdownVal}>
-                  +৳{(latest.houseRent + latest.medicalAllowance).toLocaleString()}
+                  +${(latest.houseRent + latest.medicalAllowance).toLocaleString()}
                 </Text>
               </View>
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>
-                  Approved Overtime Pay (@৳{OFFICE_TIMINGS.overtimeRatePerHour}/hr)
+                  Approved Overtime Pay (@${OFFICE_TIMINGS.overtimeRatePerHour}/hr)
                 </Text>
                 <Text style={[styles.breakdownVal, { color: "#4ADE80" }]}>
-                  +৳{latest.overtimePay.toLocaleString()}
+                  +${latest.overtimePay.toLocaleString()}
                 </Text>
               </View>
               <View style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>Taxes & Provident Fund</Text>
                 <Text style={[styles.breakdownVal, { color: "#FB7185" }]}>
-                  -৳{(latest.taxDeduction + latest.providentFund).toLocaleString()}
+                  -${(latest.taxDeduction + latest.providentFund).toLocaleString()}
                 </Text>
               </View>
             </View>
@@ -143,7 +143,7 @@ export default function SalaryScreen({ navigation }: { navigation: any }) {
                 <Text style={styles.historyDate}>Disbursed on {ps.paymentDate || "1st of month"}</Text>
               </View>
               <View style={styles.historyRight}>
-                <Text style={styles.historyAmount}>৳{ps.netPayable.toLocaleString()}</Text>
+                <Text style={styles.historyAmount}>${ps.netPayable.toLocaleString()}</Text>
                 <Text style={styles.historyStatus}>✓ {ps.paymentStatus}</Text>
               </View>
             </View>

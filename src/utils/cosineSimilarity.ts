@@ -60,7 +60,7 @@ export function aggregateEmbeddings(samples: number[][]): number[] {
 export function filterConsistentEmbeddings(samples: number[][], threshold = 0.40): { valid: number[][]; excludedCount: number } {
   if (samples.length <= 2) return { valid: samples, excludedCount: 0 };
   
-  // গড় ভেক্টর তৈরি
+  // Calculate centroid reference vector
   const centroid = aggregateEmbeddings(samples);
   const valid = samples.filter((s) => computeCosineSimilarity(s, centroid) >= threshold);
   

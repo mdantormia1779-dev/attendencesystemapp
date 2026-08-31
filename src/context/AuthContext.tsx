@@ -38,7 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(JSON.parse(storedUser));
         }
 
-        // সার্ভার থেকে লেটেস্ট ফ্রেশ প্রোফাইল ডেটা রিফ্রেশ
+        // Refresh latest profile data from server
         try {
           const res: any = await authApi.getProfile();
           const freshUser = res?.data || (res?.fullName ? res : null);
@@ -46,7 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser(freshUser);
             await AsyncStorage.setItem("auth_user", JSON.stringify(freshUser));
 
-            // যদি ডেটাবেজে ফেস রেজিস্টার্ড থাকে, তবে লোকাল স্টোরেজেও সিঙ্ক করে নেওয়া
+            // Sync registered biometric template to local cache if present
             if (freshUser.faceDescriptor && Array.isArray(freshUser.faceDescriptor) && freshUser.faceDescriptor.length === 128) {
               await attendanceService.saveRegisteredFace(
                 "local_biometric_template",
@@ -75,7 +75,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res: any = await authApi.login({ email, password: pass });
 
-      // রেসপন্স অবজেক্ট থেকে টোকেন ও ইউজার এক্সট্রাক্ট
+      // Extract token and user object from response
       const activeToken = res?.data?.token || res?.token;
       const initialUser = res?.data?.user || res?.user;
 
@@ -85,7 +85,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         let finalUser = initialUser;
 
-        // লগইন সফল হলে সরাসরি প্রোফাইল থেকে পুরো ডেটা সিঙ্ক করা
+        // Fetch full profile info on successful login
         try {
           const profileRes: any = await authApi.getProfile();
           const fullProfile = profileRes?.data || (profileRes?.fullName ? profileRes : null);

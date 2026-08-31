@@ -77,7 +77,7 @@ class FaceRecognitionService {
     base64Image?: string
   ): Promise<FaceEmbeddingResult> {
     if (this.isProcessing) {
-      // কনকারেন্ট কল এলে পূর্বের প্রসেস সমাপ্ত হওয়ার জন্য সামান্য অপেক্ষা
+      // Yield briefly if concurrent extraction is running
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
 
@@ -138,7 +138,7 @@ class FaceRecognitionService {
     registeredEmbedding: number[],
     threshold: number = FACE_MODEL_CONFIG.defaultCosineThreshold
   ): FaceVerificationResult {
-    // নিরাপত্তা চেক: ভেক্টর দৈর্ঘ্য যাচাই
+    // Safety check: Validate vector dimensions
     if (
       !probeEmbedding || 
       !registeredEmbedding || 

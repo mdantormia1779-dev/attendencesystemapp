@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { AttendancePunch, LeaveRequest, SalaryPayslip } from "../types";
+import { AttendancePunch, LeaveRequest, SalaryPayslip, LeaveStats, LeaveQuotaCategory } from "../types";
 import { attendanceApi } from "../api/attendance";
 import { leavesApi } from "../api/leaves";
 import { salaryApi } from "../api/salary";
@@ -146,7 +146,7 @@ class AttendanceService {
   }
 
   /**
-   * ফ্লেক্সিবল সেভ: অবজেক্ট বা আলাদা প্যারামিটার উভয় ফরম্যাটেই নির্ভুলভাবে আসল ভেক্টর সেভ করবে
+   * Flexible face template saver: supports object payload or individual parameters
    */
   async saveRegisteredFace(
     dataOrPhoto?: RegisteredFaceData | string,
@@ -156,7 +156,7 @@ class AttendanceService {
     let faceData: RegisteredFaceData;
 
     if (typeof dataOrPhoto === "object" && dataOrPhoto !== null) {
-      // অবজেক্ট আকারে পাঠানো হলে
+      // Handled as object structure
       faceData = {
         registered: Boolean(dataOrPhoto.registered),
         registeredAt: dataOrPhoto.registeredAt || new Date().toISOString(),
@@ -165,7 +165,7 @@ class AttendanceService {
         faceDescriptor: dataOrPhoto.faceDescriptor,
       };
     } else {
-      // প্যারামিটার আকারে পাঠানো হলে
+      // Handled as individual arguments
       faceData = {
         registered: true,
         registeredAt: new Date().toISOString(),
@@ -503,28 +503,132 @@ class AttendanceService {
   // 4. LEAVES MANAGEMENT
   // -------------------------------------------------------------
   async getLeaveBalances(): Promise<LeaveBalances> {
+    const stats = await this.getLeaveStats();
+    const balances: LeaveBalances = {
+      CASUAL: stats.CASUAL.remaining,
+      SICK: stats.SICK.remaining,
+      ANNUAL: stats.ANNUAL.remaining,
+      UNPAID: 0,
+    };
+    await AsyncStorage.setItem(KEYS.LEAVE_BALANCES, JSON.stringify(balances)).catch(() => {});
+    return balances;
+  }
+
+  async getLeaveStats(): Promise<LeaveStats> {
     const employeeId = await this.getCurrentEmployeeId();
+    let requests: LeaveRequest[] = [];
+    let customQuotas: any = null;
+
     try {
       const res = await leavesApi.getLeaves(employeeId);
-      if (res.success && res.quotas) {
-        const balances: LeaveBalances = {
-          CASUAL: res.quotas.CASUAL?.remaining ?? 10,
-          SICK: res.quotas.SICK?.remaining ?? 10,
-          ANNUAL: res.quotas.ANNUAL?.remaining ?? 15,
-          UNPAID: 0,
-        };
-        await AsyncStorage.setItem(KEYS.LEAVE_BALANCES, JSON.stringify(balances)).catch(() => {});
-        return balances;
+      if (res.success) {
+        if (res.quotas) customQuotas = res.quotas;
+        if (Array.isArray(res.data)) {
+          requests = res.data.map((item: any) => ({
+            id: item.id || `leave-${Math.random()}`,
+            leaveType: item.type || item.leaveType || "CASUAL",
+            startDate: item.startDate ? item.startDate.split("T")[0] : new Date().toISOString().split("T")[0],
+            endDate: item.endDate ? item.endDate.split("T")[0] : new Date().toISOString().split("T")[0],
+            daysCount: Number(item.daysCount || item.days || 1),
+            reason: item.reason || "Leave application",
+            status: item.status || "PENDING",
+            managerComment: item.managerComment || item.comment || (item.status === "PENDING" ? "Awaiting review by Supervisor / HR Manager" : "Approved"),
+            createdAt: item.createdAt ? item.createdAt.split("T")[0] : new Date().toISOString().split("T")[0],
+          }));
+          await AsyncStorage.setItem(KEYS.LEAVE_REQUESTS, JSON.stringify(requests)).catch(() => {});
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.log("Leaves API fetch error in stats:", e);
+    }
 
-    try {
-      const stored = await AsyncStorage.getItem(KEYS.LEAVE_BALANCES);
-      if (stored) return JSON.parse(stored);
-    } catch (e) {}
+    if (requests.length === 0) {
+      try {
+        const stored = await AsyncStorage.getItem(KEYS.LEAVE_REQUESTS);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) requests = parsed;
+        }
+      } catch (e) {}
+    }
 
-    return DEFAULT_LEAVE_BALANCES;
+    // Standard Quota Base Allocations
+    let totalCasual = customQuotas?.CASUAL?.total ?? 10;
+    let totalSick = customQuotas?.SICK?.total ?? 10;
+    let totalAnnual = customQuotas?.ANNUAL?.total ?? 15;
+    let totalUnpaid = customQuotas?.UNPAID?.total ?? 0;
+
+    let usedCasual = 0;
+    let usedSick = 0;
+    let usedAnnual = 0;
+    let usedUnpaid = 0;
+
+    let pendingCasual = 0;
+    let pendingSick = 0;
+    let pendingAnnual = 0;
+    let pendingUnpaid = 0;
+
+    for (const req of requests) {
+      const days = Number(req.daysCount) || 1;
+      const type = (req.leaveType || "").toUpperCase();
+      const status = (req.status || "").toUpperCase();
+
+      if (status === "APPROVED") {
+        if (type === "CASUAL") usedCasual += days;
+        else if (type === "SICK") usedSick += days;
+        else if (type === "ANNUAL") usedAnnual += days;
+        else if (type === "UNPAID") usedUnpaid += days;
+      } else if (status === "PENDING") {
+        if (type === "CASUAL") pendingCasual += days;
+        else if (type === "SICK") pendingSick += days;
+        else if (type === "ANNUAL") pendingAnnual += days;
+        else if (type === "UNPAID") pendingUnpaid += days;
+      }
+    }
+
+    // If server provided explicit remaining/used, prioritize it
+    if (customQuotas?.CASUAL?.used !== undefined) usedCasual = customQuotas.CASUAL.used;
+    if (customQuotas?.SICK?.used !== undefined) usedSick = customQuotas.SICK.used;
+    if (customQuotas?.ANNUAL?.used !== undefined) usedAnnual = customQuotas.ANNUAL.used;
+
+    const remainingCasual = customQuotas?.CASUAL?.remaining ?? Math.max(0, totalCasual - usedCasual);
+    const remainingSick = customQuotas?.SICK?.remaining ?? Math.max(0, totalSick - usedSick);
+    const remainingAnnual = customQuotas?.ANNUAL?.remaining ?? Math.max(0, totalAnnual - usedAnnual);
+
+    const totalApproved = usedCasual + usedSick + usedAnnual + usedUnpaid;
+    const totalPending = pendingCasual + pendingSick + pendingAnnual + pendingUnpaid;
+
+    return {
+      CASUAL: {
+        total: totalCasual,
+        used: usedCasual,
+        pending: pendingCasual,
+        remaining: remainingCasual,
+      },
+      SICK: {
+        total: totalSick,
+        used: usedSick,
+        pending: pendingSick,
+        remaining: remainingSick,
+      },
+      ANNUAL: {
+        total: totalAnnual,
+        used: usedAnnual,
+        pending: pendingAnnual,
+        remaining: remainingAnnual,
+      },
+      UNPAID: {
+        total: totalUnpaid,
+        used: usedUnpaid,
+        pending: pendingUnpaid,
+        remaining: 0,
+      },
+      totalApprovedDays: totalApproved,
+      totalPendingDays: totalPending,
+      totalRemainingDays: remainingCasual + remainingSick + remainingAnnual,
+    };
   }
+
 
   async getLeaveRequests(): Promise<LeaveRequest[]> {
     const employeeId = await this.getCurrentEmployeeId();

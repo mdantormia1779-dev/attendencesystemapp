@@ -83,7 +83,7 @@ export const FaceGuide: React.FC<FaceGuideProps> = ({
         {status === "BLINK_CHALLENGE" && (
           <Animated.View style={[styles.centerBadge, { opacity: eyeBlinkAnim }]}>
             <Eye size={36} color="#00B050" />
-            <Text style={styles.centerBadgeText}>Blink Eyes / পলক ফেলুন</Text>
+            <Text style={styles.centerBadgeText}>Blink Eyes Naturally</Text>
           </Animated.View>
         )}
 

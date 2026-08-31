@@ -56,7 +56,7 @@ export function validateFaceFrameQuality(
       lightingQuality: "GOOD",
       blurDetected: false,
       headPose: pose,
-      guidanceMessage: "Position your face inside the frame (ফ্রেমের মাঝে মুখ রাখুন)",
+      guidanceMessage: "Position your face inside the frame",
       isReadyForInference: false,
     };
   }
@@ -73,23 +73,23 @@ export function validateFaceFrameQuality(
   const isOffCenter = offsetX > FACE_DETECTION_CONFIG.centerToleranceX || offsetY > FACE_DETECTION_CONFIG.centerToleranceY;
   const isExtremePose = Math.abs(pose.yaw) > 25 || Math.abs(pose.pitch) > 20 || Math.abs(pose.roll) > 18;
 
-  let guidance = "Hold still (সোজা তাকিয়ে থাকুন)";
+  let guidance = "Hold still";
   let isReady = true;
 
   if (isTooSmall) {
-    guidance = "Move closer to camera (ক্যামেরার আরেকটু কাছে আসুন)";
+    guidance = "Move closer to camera";
     isReady = false;
   } else if (isTooLarge) {
-    guidance = "Move slightly farther (ক্যামেরা থেকে সামান্য দূরে যান)";
+    guidance = "Move slightly farther";
     isReady = false;
   } else if (isOffCenter) {
-    guidance = "Center your face in the oval guide (ফ্রেমের একদম মাঝে মুখ রাখুন)";
+    guidance = "Center your face in the oval guide";
     isReady = false;
   } else if (isExtremePose) {
-    guidance = "Look straight at the camera (সোজা ক্যামেরার দিকে তাকান)";
+    guidance = "Look straight at the camera";
     isReady = false;
   } else if (lightingValue < 30) {
-    guidance = "Improve lighting condition (পর্যাপ্ত আলোতে আসুন)";
+    guidance = "Improve lighting condition";
     isReady = false;
   }
 

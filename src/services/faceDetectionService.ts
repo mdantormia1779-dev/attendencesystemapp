@@ -21,7 +21,7 @@ class FaceDetectionService {
   private smoothedBox: BoundingBox | null = null;
 
   /**
-   * ফ্রেমের সাইজ ও পোজের ভিত্তিতে ফেস কোয়ালিটি যাচাই
+   * Evaluates face frame quality based on size, centering, and head pose
    */
   public evaluateFrame(
     viewfinderWidth: number,
@@ -31,7 +31,7 @@ class FaceDetectionService {
   ): FaceQualityMetrics {
     this.frameCount++;
 
-    // মুখ ডিটেক্ট না হলে সেন্ট্রাল ফলব্যাক বক্স
+    // Central fallback box when face bounds are not provided
     if (!faceBounds) {
       const fallbackBox: BoundingBox = {
         x: viewfinderWidth * 0.20,
@@ -45,7 +45,7 @@ class FaceDetectionService {
       return quality;
     }
 
-    // হাত ও ক্যামেরার কাঁপুনির জন্য এক্সপোনেনশিয়াল স্মুথিং (Jitter Reduction)
+    // Exponential smoothing (Jitter Reduction) for camera / hand tremor
     const activeBox = this.applySmoothing(faceBounds);
     const quality = validateFaceFrameQuality(activeBox, viewfinderWidth, viewfinderHeight, pose);
     this.lastQuality = quality;
@@ -53,7 +53,7 @@ class FaceDetectionService {
   }
 
   /**
-   * MediaPipe 468 3D ল্যান্ডমার্ক থেকে সরাসরি বাউন্ডিং বক্স ও পোজ গণনা
+   * Calculates bounding box and pose directly from MediaPipe 468 3D landmarks
    */
   public evaluateLandmarks(
     landmarks: Point3D[],
@@ -91,7 +91,7 @@ class FaceDetectionService {
   }
 
   /**
-   * ফ্রেম জাম্প ও শিফটিং দূর করতে স্মুথিং ফিল্টার
+   * Smoothing filter to eliminate frame jumps and optical shifting
    */
   private applySmoothing(newBox: BoundingBox): BoundingBox {
     if (!this.smoothedBox) {
@@ -99,7 +99,7 @@ class FaceDetectionService {
       return newBox;
     }
 
-    const alpha = 0.65; // রেসপনসিভনেস ফ্যাক্টর
+    const alpha = 0.65; // Responsiveness factor
     this.smoothedBox = {
       x: this.smoothedBox.x * (1 - alpha) + newBox.x * alpha,
       y: this.smoothedBox.y * (1 - alpha) + newBox.y * alpha,
@@ -111,7 +111,7 @@ class FaceDetectionService {
   }
 
   /**
-   * ক্যাপচার করার জন্য ফ্রেমটি উপযুক্ত কি না যাচাই
+   * Verifies if the frame meets capture quality requirements
    */
   public isFrameReadyForCapture(quality: FaceQualityMetrics): boolean {
     return Boolean(

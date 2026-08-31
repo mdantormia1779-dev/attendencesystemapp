@@ -19,7 +19,7 @@ export async function processHybridVerification(
   requiredChallenge: "BLINK" | "HEAD_LEFT" | "HEAD_RIGHT" = "BLINK",
   customThreshold: number = FACE_MODEL_CONFIG.defaultCosineThreshold
 ): Promise<HybridVerificationResult> {
-  // ১. ইনপুট ডেটা ভ্যালিডেশন
+  // 1. Input data validation
   if (!registeredEmbedding || registeredEmbedding.length !== FACE_MODEL_CONFIG.embeddingDimension) {
     return {
       verified: false,
@@ -30,7 +30,7 @@ export async function processHybridVerification(
     };
   }
 
-  // ২. Google MediaPipe Liveness যাচাই
+  // 2. Google MediaPipe Liveness Verification
   let livenessPassed = false;
   if (landmarks && landmarks.length > 0) {
     if (requiredChallenge === "BLINK") {
@@ -41,18 +41,18 @@ export async function processHybridVerification(
       livenessPassed = mediaPipeLiveness.validateHeadTurn(landmarks, "RIGHT");
     }
   } else {
-    // ল্যান্ডমার্ক না থাকলে কনফিগারেশনের ভিত্তিতে মূল্যায়ন
+    // If no landmarks available, evaluate based on safety config
     livenessPassed = false;
   }
 
-  // ৩. ArcFace 128D ভেক্টর এক্সট্রাক্ট করা
+  // 3. Extract ArcFace 128D Embedding Vector
   const probe = await faceRecognitionService.generateFaceEmbedding(
     photoUri,
     undefined,
     base64Image
   );
 
-  // ৪. কোসাইন সিমিলারিটি তুলনা
+  // 4. Compute Cosine Similarity Comparison
   const matchResult = faceRecognitionService.compareFaceEmbeddings(
     probe.embedding,
     registeredEmbedding,

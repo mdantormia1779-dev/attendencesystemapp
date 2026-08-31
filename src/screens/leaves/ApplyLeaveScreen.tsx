@@ -27,9 +27,11 @@ export default function ApplyLeaveScreen({
   navigation: any;
   route: any;
 }) {
+  const today = new Date().toISOString().split("T")[0];
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
   const [leaveType, setLeaveType] = useState<"CASUAL" | "SICK" | "ANNUAL" | "UNPAID">("CASUAL");
-  const [startDate, setStartDate] = useState("2026-08-28");
-  const [endDate, setEndDate] = useState("2026-08-29");
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(tomorrow);
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 

@@ -45,6 +45,24 @@ export interface LeaveRequest {
   createdAt: string;
 }
 
+export interface LeaveQuotaCategory {
+  total: number;
+  used: number;
+  pending: number;
+  remaining: number;
+}
+
+export interface LeaveStats {
+  CASUAL: LeaveQuotaCategory;
+  SICK: LeaveQuotaCategory;
+  ANNUAL: LeaveQuotaCategory;
+  UNPAID: LeaveQuotaCategory;
+  totalApprovedDays: number;
+  totalPendingDays: number;
+  totalRemainingDays: number;
+}
+
+
 export interface SalaryPayslip {
   id: string;
   month: string;
@@ -61,6 +79,18 @@ export interface SalaryPayslip {
   paymentDate?: string;
 }
 
+export interface ReferralWithdrawal {
+  id?: string;
+  amount: number;
+  paymentMethod: "bKash" | "Nagad" | "Rocket" | "Bank" | string;
+  paymentDetails: string;
+  accountName?: string;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "PAID" | "COMPLETED";
+  createdAt: string;
+  transactionId?: string;
+  note?: string;
+}
+
 export interface ReferralAccount {
   referralCode: string;
   referralLink: string;
@@ -70,4 +100,8 @@ export interface ReferralAccount {
   totalClicks: number;
   totalRegistrations: number;
   totalPaidCustomers: number;
+  totalEarnings?: number;
+  currency?: string;
+  withdrawals?: ReferralWithdrawal[];
 }
+

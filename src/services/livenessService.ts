@@ -12,11 +12,11 @@ const AVAILABLE_CHALLENGES: Array<{
   promptBangla: string;
   promptEnglish: string;
 }> = [
-  { type: "BLINK", promptBangla: "চোখের পলক ফেলুন (Blink Eyes)", promptEnglish: "Please blink your eyes naturally" },
-  { type: "TURN_LEFT", promptBangla: "সামান্য বামে তাকান (Turn head LEFT)", promptEnglish: "Turn your head slightly LEFT" },
-  { type: "TURN_RIGHT", promptBangla: "সামান্য ডানে তাকান (Turn head RIGHT)", promptEnglish: "Turn your head slightly RIGHT" },
-  { type: "LOOK_UP", promptBangla: "সামান্য ওপরের দিকে তাকান (Look UP)", promptEnglish: "Look slightly UP" },
-  { type: "LOOK_DOWN", promptBangla: "সামান্য নিচের দিকে তাকান (Look DOWN)", promptEnglish: "Look slightly DOWN" },
+  { type: "BLINK", promptBangla: "Please blink your eyes naturally", promptEnglish: "Please blink your eyes naturally" },
+  { type: "TURN_LEFT", promptBangla: "Turn your head slightly LEFT", promptEnglish: "Turn your head slightly LEFT" },
+  { type: "TURN_RIGHT", promptBangla: "Turn your head slightly RIGHT", promptEnglish: "Turn your head slightly RIGHT" },
+  { type: "LOOK_UP", promptBangla: "Look slightly UP", promptEnglish: "Look slightly UP" },
+  { type: "LOOK_DOWN", promptBangla: "Look slightly DOWN", promptEnglish: "Look slightly DOWN" },
 ];
 
 class LivenessService {
@@ -25,7 +25,7 @@ class LivenessService {
   private opticalTransitionDetected = false;
   private motionAccumulator = 0;
   private consecutivePassFrames = 0;
-  private static REQUIRED_CONSECUTIVE_FRAMES = 2; // নির্ভরযোগ্যতার জন্য অন্তত ২ ফ্রেম যাচাই
+  private static REQUIRED_CONSECUTIVE_FRAMES = 2; // Verify at least 2 frames for reliability
 
   /**
    * Starts a new randomized challenge-response session
@@ -52,7 +52,7 @@ class LivenessService {
   }
 
   /**
-   * MediaPipe 468 3D ল্যান্ডমার্ক থেকে সরাসরি চ্যালেঞ্জ যাচাই
+   * Evaluate challenge directly from MediaPipe 468 3D landmarks
    */
   public evaluateLandmarks(landmarks: Point3D[]): boolean {
     if (!this.activeChallenge || !landmarks || landmarks.length === 0) {
@@ -81,13 +81,13 @@ class LivenessService {
 
       case "LOOK_UP": {
         const { pitch } = calculateHeadPose(landmarks);
-        framePassed = pitch < 0.38; // নাক ফ্রেমের ওপরের অংশে
+        framePassed = pitch < 0.38; // Nose position towards upper frame
         break;
       }
 
       case "LOOK_DOWN": {
         const { pitch } = calculateHeadPose(landmarks);
-        framePassed = pitch > 0.62; // নাক ফ্রেমের নিচের অংশে
+        framePassed = pitch > 0.62; // Nose position towards lower frame
         break;
       }
     }
@@ -111,7 +111,7 @@ class LivenessService {
    */
   public recordMotionProgress(detectedPose: { yaw: number; pitch: number; roll: number } | null): boolean {
     if (!this.activeChallenge || !detectedPose) {
-      return false; // নাল পেলে আর বাইপাস হবে না
+      return false;
     }
 
     const elapsed = Date.now() - this.challengeStartTime;
@@ -145,7 +145,7 @@ class LivenessService {
         }
         break;
       case "BLINK":
-        // ব্লিঙ্ক ইভেন্ট সরাসরি registerBlinkEvent() দিয়ে কল হবে
+        // Blink event directly processed via registerBlinkEvent()
         break;
     }
 

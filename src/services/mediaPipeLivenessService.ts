@@ -9,11 +9,11 @@ export interface LivenessStatus {
 
 export class MediaPipeLivenessValidator {
   private blinkHistory: number[] = [];
-  private static BLINK_CLOSED_THRESHOLD = 0.19; // EAR < 0.19 হলে চোখ বন্ধ ধরা হয়
-  private static BLINK_OPEN_THRESHOLD = 0.26;   // EAR > 0.26 হলে চোখ খোলা ধরা হয়
+  private static BLINK_CLOSED_THRESHOLD = 0.19; // EAR < 0.19 considered closed
+  private static BLINK_OPEN_THRESHOLD = 0.26;   // EAR > 0.26 considered open
 
   /**
-   * Eye Aspect Ratio (EAR) স্টেট ট্র্যাকিং দিয়ে স্বাভাবিক চোখের পলক যাচাই
+   * Evaluates natural eye blink using Eye Aspect Ratio (EAR) state tracking
    */
   public validateBlink(landmarks: Point3D[]): boolean {
     if (!landmarks || landmarks.length < 468) return false;
@@ -22,16 +22,16 @@ export class MediaPipeLivenessValidator {
     this.blinkHistory.push(ear);
     if (this.blinkHistory.length > 12) this.blinkHistory.shift();
 
-    // পূর্বের ফ্রেমগুলোতে চোখ খোলা থাকার রেকর্ড
+    // Verify eye was open in preceding frames
     const wasOpen = this.blinkHistory.slice(0, 6).some((val) => val >= MediaPipeLivenessValidator.BLINK_OPEN_THRESHOLD);
-    // বর্তমান ফ্রেমে চোখ বন্ধ হওয়া
+    // Verify eye is closed in current frame
     const isClosedNow = ear <= MediaPipeLivenessValidator.BLINK_CLOSED_THRESHOLD;
 
     return wasOpen && isClosedNow;
   }
 
   /**
-   * মাথার কোণ (Yaw) যাচাই করে ডানে/বামে ঘোরানো ট্র্যাকিং
+   * Tracks left/right head turn using horizontal angle (Yaw)
    */
   public validateHeadTurn(landmarks: Point3D[], direction: "LEFT" | "RIGHT"): boolean {
     if (!landmarks || landmarks.length < 468) return false;
@@ -43,7 +43,7 @@ export class MediaPipeLivenessValidator {
   }
 
   /**
-   * মাথার উলম্ব কোণ (Pitch) যাচাই করে উপরে/নিচে তাকানো ট্র্যাকিং
+   * Tracks up/down head pitch using vertical angle
    */
   public validateVerticalTilt(landmarks: Point3D[], direction: "UP" | "DOWN"): boolean {
     if (!landmarks || landmarks.length < 468) return false;
@@ -55,7 +55,7 @@ export class MediaPipeLivenessValidator {
   }
 
   /**
-   * ৩ডি ফেস মেশের গভীরতা (Z-Axis Depth Variance) বিশ্লেষণ করে ২ডি স্ক্রিন/ফটো অ্যাটাক প্রতিরোধ
+   * Analyzes 3D face mesh depth variance (Z-Axis) to prevent 2D screen & photo spoofing
    */
   public validate3DDepth(landmarks: Point3D[]): boolean {
     if (!landmarks || landmarks.length < 468) return false;
@@ -65,12 +65,12 @@ export class MediaPipeLivenessValidator {
     const rightCheekZ = landmarks[454].z;
 
     const depthVariance = Math.abs(noseZ - (leftCheekZ + rightCheekZ) / 2);
-    // ফ্ল্যাট স্ক্রিন বা কাগজের ছবিতে Z-অক্ষের পার্থক্য প্রায় শূন্য থাকে
+    // Flat 2D screen or paper displays have near zero Z-depth variance
     return depthVariance > 0.02;
   }
 
   /**
-   * সেশন শেষে হিস্ট্রি ক্লিয়ার করা
+   * Clears state history upon session completion
    */
   public reset(): void {
     this.blinkHistory = [];

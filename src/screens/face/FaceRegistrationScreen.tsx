@@ -169,7 +169,7 @@ export default function FaceRegistrationScreen({ navigation }: { navigation: any
     setCurrentStepIndex(stepNum);
     setState("FACE_READY");
 
-    // ইউজারকে পোজ পরিবর্তন করার জন্য কিছুটা সময় দেওয়া
+    // Allow user brief moment to adjust pose
     setTimeout(async () => {
       if (!isMountedRef.current) return;
 
@@ -195,7 +195,7 @@ export default function FaceRegistrationScreen({ navigation }: { navigation: any
         }
 
 
-        // ArcFace ভেক্টর এক্সট্রাক্ট
+        // Extract ArcFace 128D Embedding
         const embeddingResult = await faceRecognitionService.generateFaceEmbedding(
           photoUri,
           undefined,
