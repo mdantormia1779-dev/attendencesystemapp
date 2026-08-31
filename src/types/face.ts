@@ -66,7 +66,9 @@ export interface FaceQualityMetrics {
   isCentered: boolean;
   isSizeValid: boolean;
   lightingQuality: "GOOD" | "TOO_DARK" | "TOO_BRIGHT";
+  lightingScore?: number;
   blurDetected: boolean;
+  blurScore?: number;
   headPose: {
     yaw: number;   // Left-right angle (-90 to +90)
     pitch: number; // Up-down angle (-90 to +90)
@@ -75,6 +77,7 @@ export interface FaceQualityMetrics {
   guidanceMessage: string;
   isReadyForInference: boolean;
 }
+
 
 export type FaceQuality = FaceQualityMetrics;
 

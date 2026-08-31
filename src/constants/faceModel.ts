@@ -10,10 +10,23 @@ export const FACE_MODEL_CONFIG = {
   std: [128.0, 128.0, 128.0] as [number, number, number],
   embeddingDimension: 128,
 
-  // ০.৫০ এর নিচে নামলে ভেরিফিকেশন পাস হবে না
-  defaultCosineThreshold: 0.50,
+  // ArcFace 128D Cosine Similarity Threshold (>= 0.38 is positive identity match)
+  defaultCosineThreshold: 0.38,
   defaultEuclideanThreshold: 0.70,
+
+
   minLivenessConfidence: 85.0,
   registrationSamplesRequired: 3,
   maxInferenceConcurrency: 1,
+};
+
+export const FACE_DETECTION_CONFIG = {
+  minFaceSize: 0.15,
+  minFaceSizeRatio: 0.15,
+  maxFaceSizeRatio: 0.85,
+  centerToleranceX: 0.3,
+  centerToleranceY: 0.3,
+  trackingConfidence: 0.7,
+  minLightingScore: 0.4,
+  maxBlurScore: 0.6,
 };

@@ -92,37 +92,30 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
     ]);
   };
 
-  // Profile Data Mapping with intelligent fallbacks
-  const displayName = profileDetails?.fullName || user?.fullName || user?.name || "MD ANTOR MIA";
-  const displayEmail = profileDetails?.email || user?.email || "antor@gmail.com";
+  // Profile Data Mapping directly from Real Backend API
+  const displayName = profileDetails?.fullName || user?.fullName || (user as any)?.name || "Employee";
+  const displayEmail = profileDetails?.email || user?.email || "";
+  const displayCode = profileDetails?.employeeCode || profileDetails?.employeeId || (user as any)?.employeeCode || (user as any)?.employeeId || "EMP-0001";
+  const displayDesignation = profileDetails?.designation || user?.designation || "Employee";
+  const displayDepartment = profileDetails?.department || user?.department || "General";
+  const displayBranch = branchInfo?.branchName || profileDetails?.branch || (user as any)?.branch || "Main Branch";
+  const displayRadius = branchInfo?.geofenceRadius || profileDetails?.geofenceRadius || 120;
+  const displayPhone = profileDetails?.phone || (user as any)?.phone || "+880 1700-000000";
   
-  // Format code from raw userId (emp-1788119345526-469 -> EMP-469)
-  const employeeIdRaw = profileDetails?.id || profileDetails?.userId || user?.userId || "emp-1788119345526-469";
-  const displayCode = profileDetails?.employeeCode 
-    || user?.employeeCode 
-    || `EMP-${employeeIdRaw.split("-").pop()}`;
+  const displayShift = profileDetails?.shift || (user as any)?.shift || "09:00 AM - 06:00 PM";
+  const displayShiftName = profileDetails?.shiftName || (user as any)?.shiftName || "Regular Shift";
 
-  const displayDesignation = profileDetails?.designation 
-    || user?.designation 
-    || (user?.role === "EMPLOYEE" ? "Front-End Web Developer" : "System Administrator");
+  const rawJoinDate = profileDetails?.joiningDate || (user as any)?.joiningDate || (user as any)?.createdAt;
+  const displayJoinDate = rawJoinDate 
+    ? new Date(rawJoinDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : "30 Aug 2026";
 
-  const displayDepartment = profileDetails?.department 
-    || user?.department 
-    || "Engineering & Tech";
+  const employeeIdRaw = profileDetails?.id || profileDetails?.userId || (user as any)?.userId || user?.id || "EMP-0001";
+  const isFaceActive = Boolean(faceData?.registered || profileDetails?.isFaceEnrolled);
 
-  const displayBranch = branchInfo?.branchName 
-    || profileDetails?.branch?.name 
-    || user?.branch 
-    || "Main HQ Office";
 
-  const displayRadius = branchInfo?.geofenceRadius 
-    || profileDetails?.geofenceRadius 
-    || 120;
 
-  const displayPhone = profileDetails?.phone || user?.phone || "+880 1700-000000";
-  const displayJoinDate = profileDetails?.createdAt 
-    ? new Date(profileDetails.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-    : "15 Jan 2024";
+
 
   return (
     <SafeAreaView style={styles.container}>
@@ -171,10 +164,10 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
           <Text style={styles.email}>{displayEmail}</Text>
 
           <View style={styles.badgeContainer}>
-            <View style={[styles.statusPill, !faceData.registered && styles.statusPillPending]}>
-              <ShieldCheck size={13} color={faceData.registered ? "#00B050" : "#D97706"} />
-              <Text style={[styles.statusPillText, !faceData.registered && styles.statusPillTextPending]}>
-                {faceData.registered ? "Face Biometric Active" : "Face Biometric Pending Setup"}
+            <View style={[styles.statusPill, !isFaceActive && styles.statusPillPending]}>
+              <ShieldCheck size={13} color={isFaceActive ? "#00B050" : "#D97706"} />
+              <Text style={[styles.statusPillText, !isFaceActive && styles.statusPillTextPending]}>
+                {isFaceActive ? "Face Biometric Active" : "Face Biometric Pending Setup"}
               </Text>
             </View>
           </View>
@@ -198,25 +191,23 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
             <ChevronRight size={18} color="#94A3B8" />
           </TouchableOpacity>
 
-          <TouchableOpacity
+          <View
             style={[styles.menuRow, { borderBottomWidth: 0 }]}
-            onPress={() => navigation.navigate("FaceRegister")}
-            activeOpacity={0.7}
           >
-            <View style={[styles.menuIconBox, { backgroundColor: "#EFF6FF" }]}>
-              <Camera size={20} color="#2563EB" />
+            <View style={[styles.menuIconBox, { backgroundColor: "#ECFDF5" }]}>
+              <ShieldCheck size={20} color="#00B050" />
             </View>
             <View style={styles.menuText}>
-              <Text style={styles.menuTitle}>Facial Biometric Setup</Text>
+              <Text style={styles.menuTitle}>GPS Geofence Security</Text>
               <Text style={styles.menuSub}>
-                {faceData.registered ? "Re-scan / update stored facial template" : "Scan and register face"}
+                Active · Office perimeter attendance enabled
               </Text>
             </View>
-            <ChevronRight size={18} color="#94A3B8" />
-          </TouchableOpacity>
+          </View>
         </View>
 
         {/* Employment Information */}
+
         <Text style={styles.sectionTitle}>Employment Details</Text>
         <View style={styles.infoCard}>
           <View style={styles.infoRow}>
@@ -240,8 +231,9 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
               <Clock size={16} color="#64748B" />
               <Text style={styles.infoLabel}>Office Shift</Text>
             </View>
-            <Text style={styles.infoVal}>{OFFICE_TIMINGS.shiftStart} - {OFFICE_TIMINGS.shiftEnd}</Text>
+            <Text style={styles.infoVal}>{displayShift}</Text>
           </View>
+
 
           <View style={styles.infoRow}>
             <View style={styles.infoLeft}>

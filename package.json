@@ -29,13 +29,6 @@
     "react-native-svg": "15.12.1",
     "react-native-web": "^0.21.0"
   },
-  "expo": {
-    "install": {
-      "exclude": [
-        "expo"
-      ]
-    }
-  },
   "devDependencies": {
     "@types/react": "~19.1.10",
     "typescript": "~5.9.2"

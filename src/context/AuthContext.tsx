@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { EmployeeUser } from "../types";
 import { authApi } from "../api/auth";
+import { attendanceService } from "../services/attendanceService";
 
 interface AuthContextType {
   user: EmployeeUser | null;
@@ -44,6 +45,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (freshUser) {
             setUser(freshUser);
             await AsyncStorage.setItem("auth_user", JSON.stringify(freshUser));
+
+            // যদি ডেটাবেজে ফেস রেজিস্টার্ড থাকে, তবে লোকাল স্টোরেজেও সিঙ্ক করে নেওয়া
+            if (freshUser.faceDescriptor && Array.isArray(freshUser.faceDescriptor) && freshUser.faceDescriptor.length === 128) {
+              await attendanceService.saveRegisteredFace(
+                "local_biometric_template",
+                freshUser.fullName || "Employee",
+                freshUser.faceDescriptor
+              );
+            }
           }
         } catch (err) {
           console.log("Profile refresh notice during boot:", err);
@@ -55,6 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     }
   };
+
 
   useEffect(() => {
     loadStoredSession();
@@ -88,6 +99,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (finalUser) {
           setUser(finalUser);
           await AsyncStorage.setItem("auth_user", JSON.stringify(finalUser));
+
+          if (finalUser.faceDescriptor && Array.isArray(finalUser.faceDescriptor) && finalUser.faceDescriptor.length === 128) {
+            await attendanceService.saveRegisteredFace(
+              "local_biometric_template",
+              finalUser.fullName || "Employee",
+              finalUser.faceDescriptor
+            );
+          }
         }
 
         return { success: true };
@@ -113,11 +132,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (freshUser) {
         setUser((prev) => ({ ...prev, ...freshUser }));
         await AsyncStorage.setItem("auth_user", JSON.stringify(freshUser));
+
+        if (freshUser.faceDescriptor && Array.isArray(freshUser.faceDescriptor) && freshUser.faceDescriptor.length === 128) {
+          await attendanceService.saveRegisteredFace(
+            "local_biometric_template",
+            freshUser.fullName || "Employee",
+            freshUser.faceDescriptor
+          );
+        }
       }
     } catch (e) {
       console.error("Failed to refresh profile:", e);
     }
   };
+
 
   return (
     <AuthContext.Provider value={{ user, token, loading, login, logout, refreshProfile }}>

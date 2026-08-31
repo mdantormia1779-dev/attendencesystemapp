@@ -117,10 +117,11 @@ class FaceDetectionService {
     return Boolean(
       quality.isCentered &&
       quality.isSizeValid &&
-      quality.lightingScore >= FACE_DETECTION_CONFIG.minLightingScore &&
-      quality.blurScore <= FACE_DETECTION_CONFIG.maxBlurScore
+      quality.lightingQuality === "GOOD" &&
+      !quality.blurDetected
     );
   }
+
 
   public getLastQuality(): FaceQualityMetrics | null {
     return this.lastQuality;

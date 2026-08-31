@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Share,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -22,25 +23,64 @@ import {
 } from "lucide-react-native";
 import { useAuth } from "../../context/AuthContext";
 import { OFFICE_TIMINGS } from "../../services/attendanceService";
+import { branchApi, BranchLocationData } from "../../api/branch";
+import { authApi } from "../../api/auth";
+
 
 export default function IDCardScreen({ navigation }: { navigation: any }) {
   const { user } = useAuth();
-  console.log(user)
+  const [profileData, setProfileData] = useState<any>(user);
+  const [branchData, setBranchData] = useState<BranchLocationData | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const employeeName = user?.fullName || user?.name || "Arif Chowdhury";
-  const employeeCode = user?.employeeCode || "EMP-1029";
-  const designation = user?.designation || "Senior Software Engineer";
-  const department = user?.department || "Engineering & AI Tech";
+  useEffect(() => {
+    const loadRealData = async () => {
+      try {
+        const [res, bRes]: any = await Promise.all([
+          authApi.getProfile().catch(() => null),
+          branchApi.getBranchLocation().catch(() => null),
+        ]);
+        if (res?.success && res?.data) {
+          setProfileData(res.data);
+        } else if (res && (res.fullName || res.email)) {
+          setProfileData(res);
+        }
+        if (bRes?.success && bRes?.data) {
+          setBranchData(bRes.data);
+        }
+      } catch (e) {
+        console.log("ID card profile load note:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadRealData();
+  }, []);
+
+  const employeeName = profileData?.fullName || user?.fullName || "Employee";
+  const employeeCode = profileData?.employeeCode || profileData?.employeeId || (user as any)?.employeeCode || (user as any)?.employeeId || "EMP-0001";
+  const designation = profileData?.designation || user?.designation || "Employee";
+  const department = profileData?.department || user?.department || "General";
+  const branchName = branchData?.branchName || profileData?.branch || (user as any)?.branch || "Office";
+  const orgName = profileData?.organizationName || (user as any)?.organizationName || "Smart Attendance Enterprise";
+
+  const rawJoinDate = profileData?.joiningDate || (user as any)?.joiningDate || (user as any)?.createdAt;
+  const joinDateFormatted = rawJoinDate 
+    ? new Date(rawJoinDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : "30 Aug 2026";
+
+
 
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Digital Employee ID Card\nName: ${employeeName}\nID: ${employeeCode}\nDesignation: ${designation}\nOrganization: Vertex Tech / Smart Attendance Portal\nVerified Biometric ID`,
+        message: `Digital Employee ID Card\nName: ${employeeName}\nID: ${employeeCode}\nDesignation: ${designation}\nDepartment: ${department}\nBranch: ${branchName}\nOrganization: ${orgName}\nVerified Biometric ID`,
       });
     } catch (e) {
       console.error(e);
     }
   };
+
 
   return (
     <SafeAreaView style={styles.container}>
@@ -103,10 +143,12 @@ export default function IDCardScreen({ navigation }: { navigation: any }) {
                 <Text style={styles.avatarInitials}>
                   {employeeName
                     .split(" ")
-                    .map((n) => n[0])
+                    .filter(Boolean)
+                    .map((n: string) => n[0])
                     .join("")
                     .slice(0, 2)
                     .toUpperCase()}
+
                 </Text>
               </View>
               <View style={styles.verifiedIcon}>
@@ -135,12 +177,13 @@ export default function IDCardScreen({ navigation }: { navigation: any }) {
             </View>
             <View style={styles.infoItem}>
               <Text style={styles.infoLabel}>JOIN DATE</Text>
-              <Text style={styles.infoValue}>15 Jan 2024</Text>
+              <Text style={styles.infoValue}>{joinDateFormatted}</Text>
             </View>
             <View style={styles.infoItem}>
-              <Text style={styles.infoLabel}>VALID THRU</Text>
-              <Text style={[styles.infoValue, { color: "#00B050" }]}>DEC 2028</Text>
+              <Text style={styles.infoLabel}>BRANCH / STATUS</Text>
+              <Text style={[styles.infoValue, { color: "#00B050" }]}>{branchName} (ACTIVE)</Text>
             </View>
+
           </View>
 
           {/* Digital QR Code & Barcode Section */}

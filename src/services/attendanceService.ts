@@ -3,6 +3,8 @@ import { AttendancePunch, LeaveRequest, SalaryPayslip } from "../types";
 import { attendanceApi } from "../api/attendance";
 import { leavesApi } from "../api/leaves";
 import { salaryApi } from "../api/salary";
+import { faceApi } from "./faceApi";
+
 
 const KEYS = {
   REGISTERED_FACE: "sa_face_meta_v4",
@@ -86,11 +88,12 @@ class AttendanceService {
       const stored = await AsyncStorage.getItem("auth_user");
       if (stored) {
         const u = JSON.parse(stored);
-        return u.employeeCode || u.employeeId || u.code || u.id || "EMP-0001";
+        return u.id || u.userId || u.employeeCode || u.employeeId || "EMP-0001";
       }
     } catch (e) {}
     return "EMP-0001";
   }
+
 
   formatTime(date: Date): string {
     return date.toLocaleTimeString("en-US", {
@@ -115,10 +118,29 @@ class AttendanceService {
     try {
       const data = await AsyncStorage.getItem(KEYS.REGISTERED_FACE);
       if (data) {
-        return JSON.parse(data);
+        const parsed = JSON.parse(data);
+        if (parsed.registered && Array.isArray(parsed.faceDescriptor) && parsed.faceDescriptor.length === 128) {
+          return parsed;
+        }
+      }
+
+      // Sync from backend database if local cache is empty
+      const empId = await this.getCurrentEmployeeId();
+      if (empId) {
+        const statusRes = await faceApi.getFaceStatus(empId).catch(() => null);
+        if (statusRes?.success && statusRes.data?.isEnrolled && (statusRes.data as any)?.descriptor) {
+          const syncedFace: RegisteredFaceData = {
+            registered: true,
+            registeredAt: statusRes.data.enrolledAt || new Date().toISOString(),
+            name: "Employee",
+            faceDescriptor: (statusRes.data as any).descriptor,
+          };
+          await AsyncStorage.setItem(KEYS.REGISTERED_FACE, JSON.stringify(syncedFace)).catch(() => {});
+          return syncedFace;
+        }
       }
     } catch (e) {
-      await AsyncStorage.removeItem(KEYS.REGISTERED_FACE).catch(() => {});
+      console.log("getRegisteredFace sync note:", e);
     }
     return { registered: false };
   }
@@ -165,61 +187,56 @@ class AttendanceService {
   async verifyFace(photoUri?: string, liveDescriptor?: number[]): Promise<{ matched: boolean; score: number; message: string }> {
     const registered = await this.getRegisteredFace();
 
-    if (!registered.registered || !registered.faceDescriptor) {
-      await this.saveRegisteredFace({
-        registered: true,
-        name: "Employee",
-        faceDescriptor: liveDescriptor,
-        registeredAt: new Date().toISOString(),
-      });
+    if (!registered.registered || !registered.faceDescriptor || registered.faceDescriptor.length !== 128) {
       return {
-        matched: true,
-        score: 99.6,
-        message: "First-Time Face Template Enrolled Successfully!",
+        matched: false,
+        score: 0,
+        message: "No biometric face profile enrolled for your account.",
+      };
+    }
+
+    if (!liveDescriptor || !Array.isArray(liveDescriptor) || liveDescriptor.length !== 128) {
+      return {
+        matched: false,
+        score: 0,
+        message: "No face detected in camera frame. Please keep face inside circle.",
       };
     }
 
     const baseline = registered.faceDescriptor;
-    const probe = liveDescriptor && liveDescriptor.length === 128 ? liveDescriptor : baseline;
+    const probe = liveDescriptor;
 
     let dot = 0;
     let normA = 0;
     let normB = 0;
 
-    for (let i = 0; i < baseline.length; i++) {
+    for (let i = 0; i < 128; i++) {
       dot += (probe[i] || 0) * (baseline[i] || 0);
       normA += (probe[i] || 0) * (probe[i] || 0);
       normB += (baseline[i] || 0) * (baseline[i] || 0);
     }
 
-    const cosineSim = dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
+    const denom = Math.sqrt(normA) * Math.sqrt(normB) || 1;
+    const cosineSim = Math.max(-1, Math.min(1, dot / denom));
     const score = parseFloat((cosineSim * 100).toFixed(1));
+    const matched = cosineSim >= 0.58;
 
     return {
-      matched: cosineSim >= 0.58,
+      matched,
       score,
-      message: `Live Identity Verified (${score}% Match with Enrolled Face)`,
+      message: matched
+        ? `Live Identity Verified (${score}% Match with Enrolled Face)`
+        : `Face Not Matched (${score}% Match, Required 58.0%)`,
     };
   }
+
 
   // -------------------------------------------------------------
   // 2. TODAY'S ATTENDANCE PUNCH & OVERTIME
   // -------------------------------------------------------------
   async getTodayPunch(): Promise<TodayPunchState> {
     const todayStr = this.formatDate(new Date());
-    try {
-      const stored = await AsyncStorage.getItem(KEYS.TODAY_PUNCH);
-      if (stored) {
-        const parsed: TodayPunchState = JSON.parse(stored);
-        if (parsed.date === todayStr) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      await AsyncStorage.removeItem(KEYS.TODAY_PUNCH).catch(() => {});
-    }
-
-    return {
+    let localState: TodayPunchState = {
       hasPunchedIn: false,
       hasPunchedOut: false,
       date: todayStr,
@@ -228,6 +245,44 @@ class AttendanceService {
       overtimeHours: 0,
       locationStatus: "IN_OFFICE",
     };
+
+    try {
+      const stored = await AsyncStorage.getItem(KEYS.TODAY_PUNCH);
+      if (stored) {
+        const parsed: TodayPunchState = JSON.parse(stored);
+        if (parsed.date === todayStr) {
+          localState = parsed;
+        }
+      }
+    } catch (e) {
+      await AsyncStorage.removeItem(KEYS.TODAY_PUNCH).catch(() => {});
+    }
+
+    // Sync from database if available
+    try {
+      const empId = await this.getCurrentEmployeeId();
+      const dbRes = await attendanceApi.getTodayStatus(empId).catch(() => null);
+      if (dbRes?.success && dbRes?.data) {
+        const d = dbRes.data;
+        const syncedState: TodayPunchState = {
+          hasPunchedIn: Boolean(d.hasPunchedIn),
+          hasPunchedOut: Boolean(d.hasPunchedOut),
+          checkInTime: d.checkInTime || localState.checkInTime,
+          checkInTimestamp: d.checkInTimestamp || localState.checkInTimestamp,
+          checkOutTime: d.checkOutTime || localState.checkOutTime,
+          checkOutTimestamp: d.checkOutTimestamp || localState.checkOutTimestamp,
+          date: todayStr,
+          status: d.status || localState.status || "PRESENT",
+          workedHours: typeof d.workedHours === "number" ? d.workedHours : localState.workedHours,
+          overtimeHours: typeof d.overtimeHours === "number" ? d.overtimeHours : localState.overtimeHours,
+          locationStatus: "IN_OFFICE",
+        };
+        await AsyncStorage.setItem(KEYS.TODAY_PUNCH, JSON.stringify(syncedState)).catch(() => {});
+        return syncedState;
+      }
+    } catch (e) {}
+
+    return localState;
   }
 
   async punchIn(photoUri?: string, lat = 23.8103, lng = 90.4125): Promise<TodayPunchState> {
@@ -236,7 +291,36 @@ class AttendanceService {
     const timeStr = this.formatTime(now);
     const employeeId = await this.getCurrentEmployeeId();
 
-    const isLate = now.getHours() > 9 || (now.getHours() === 9 && now.getMinutes() > OFFICE_TIMINGS.gracePeriodMinutes);
+    // Parse dynamic user shift start time from stored user session
+    let shiftStartHour = 9;
+    let shiftStartMinute = 0;
+    let graceMinutes = 15;
+
+    try {
+      const storedUser = await AsyncStorage.getItem("auth_user");
+      if (storedUser) {
+        const u = JSON.parse(storedUser);
+        if (u.shiftStart) {
+          const match = u.shiftStart.match(/^(\d{1,2}):(\d{2})(?:\s*([APap][Mm]))?$/);
+          if (match) {
+            let h = parseInt(match[1], 10);
+            const m = parseInt(match[2], 10);
+            const meridiem = match[3]?.toUpperCase();
+            if (meridiem === "PM" && h < 12) h += 12;
+            if (meridiem === "AM" && h === 12) h = 0;
+            shiftStartHour = h;
+            shiftStartMinute = m;
+          }
+        }
+        if (typeof u.shiftGracePeriod === "number") {
+          graceMinutes = u.shiftGracePeriod;
+        }
+      }
+    } catch (e) {}
+
+    const totalNowMinutes = now.getHours() * 60 + now.getMinutes();
+    const cutoffMinutes = shiftStartHour * 60 + shiftStartMinute + graceMinutes;
+    const isLate = totalNowMinutes > cutoffMinutes;
     const status = isLate ? "LATE" : "PRESENT";
 
     const state: TodayPunchState = {
@@ -258,12 +342,17 @@ class AttendanceService {
     } catch (e) {}
 
     try {
-      await attendanceApi.checkIn({
+      const apiRes = await attendanceApi.checkIn({
         employeeId,
         latitude: lat,
         longitude: lng,
-        verificationMethod: "FACE_RECOGNITION",
+        verificationMethod: "GPS_GEOFENCE",
       });
+      if (apiRes?.data) {
+        state.checkInTime = apiRes.data.checkInTime || state.checkInTime;
+        state.status = apiRes.data.status || state.status;
+        await AsyncStorage.setItem(KEYS.TODAY_PUNCH, JSON.stringify(state)).catch(() => {});
+      }
     } catch (apiErr) {
       console.log("Backend check-in notice:", apiErr);
     }
@@ -287,6 +376,7 @@ class AttendanceService {
 
     const state: TodayPunchState = {
       ...today,
+      hasPunchedIn: true,
       hasPunchedOut: true,
       checkOutTime: timeStr,
       checkOutTimestamp: now.getTime(),
@@ -301,17 +391,26 @@ class AttendanceService {
     } catch (e) {}
 
     try {
-      await attendanceApi.checkOut({
+      const apiRes = await attendanceApi.checkOut({
         employeeId,
         latitude: lat,
         longitude: lng,
+        verificationMethod: "GPS_GEOFENCE",
       });
+      if (apiRes?.data) {
+        state.checkOutTime = apiRes.data.checkOutTime || state.checkOutTime;
+        if (typeof apiRes.data.workedHours === "number") {
+          state.workedHours = apiRes.data.workedHours;
+        }
+        await AsyncStorage.setItem(KEYS.TODAY_PUNCH, JSON.stringify(state)).catch(() => {});
+      }
     } catch (apiErr) {
       console.log("Backend check-out notice:", apiErr);
     }
 
     return state;
   }
+
 
   // -------------------------------------------------------------
   // 3. ATTENDANCE HISTORY LOGS

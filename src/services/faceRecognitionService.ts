@@ -151,9 +151,17 @@ class FaceRecognitionService {
         similarity: 0,
         euclideanDistance: 99,
         threshold,
-        liveness: { passed: false, score: 0 },
+        liveness: {
+          passed: false,
+          challengeType: "BLINK",
+          opticalTransitionDetected: false,
+          motionScore: 0,
+          elapsedMs: 0,
+        },
         verifiedAt: new Date().toISOString(),
       };
+
+
     }
 
     const normProbe = this.normalizeEmbedding(probeEmbedding);

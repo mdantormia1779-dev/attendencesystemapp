@@ -12,6 +12,12 @@ export const attendanceApi = {
     return apiRequest<any[]>(`/api/attendance${query}`);
   },
 
+  getTodayStatus: async (employeeId?: string) => {
+    let query = "";
+    if (employeeId) query = `?employeeId=${encodeURIComponent(employeeId)}`;
+    return apiRequest<any>(`/api/attendance/today${query}`);
+  },
+
   checkIn: async (data: {
     employeeId: string;
     latitude: number;
@@ -25,8 +31,7 @@ export const attendanceApi = {
         employeeId: data.employeeId,
         latitude: data.latitude,
         longitude: data.longitude,
-        verificationMethod: data.verificationMethod || "FACE_RECOGNITION",
-        faceVector: data.faceVector && data.faceVector.length === 128 ? data.faceVector : new Array(128).fill(0.05),
+        verificationMethod: data.verificationMethod || "GPS_GEOFENCE",
       },
     });
   },
@@ -35,6 +40,7 @@ export const attendanceApi = {
     employeeId: string;
     latitude: number;
     longitude: number;
+    verificationMethod?: "FACE_RECOGNITION" | "GPS_GEOFENCE" | "BIOMETRIC_DEVICE" | "MANUAL_OVERRIDE";
   }) => {
     return apiRequest<any>("/api/attendance/check-out", {
       method: "POST",
@@ -42,7 +48,9 @@ export const attendanceApi = {
         employeeId: data.employeeId,
         latitude: data.latitude,
         longitude: data.longitude,
+        verificationMethod: data.verificationMethod || "GPS_GEOFENCE",
       },
     });
   },
 };
+

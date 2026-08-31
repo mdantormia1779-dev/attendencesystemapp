@@ -34,12 +34,13 @@ import { FaceCamera } from "../../components/face/FaceCamera";
 import { FaceRegistrationState, FaceProfileStatus } from "../../types/face";
 
 const REGISTRATION_STEPS = [
-  { index: 1, labelEn: "Look straight at the camera", labelBn: "সোজা ক্যামেরার দিকে তাকান", tag: "CENTER" },
-  { index: 2, labelEn: "Turn your head slightly LEFT", labelBn: "সামান্য বাঁয়ে তাকান", tag: "SLIGHT_LEFT" },
-  { index: 3, labelEn: "Turn your head slightly RIGHT", labelBn: "সামান্য ডানে তাকান", tag: "SLIGHT_RIGHT" },
-  { index: 4, labelEn: "Look slightly UP", labelBn: "সামান্য ওপরের দিকে তাকান", tag: "SLIGHT_UP" },
-  { index: 5, labelEn: "Look slightly DOWN", labelBn: "সামান্য নিচের দিকে তাকান", tag: "SLIGHT_DOWN" },
+  { index: 1, labelEn: "Look straight at the camera", labelBn: "Keep face steady and centered", tag: "CENTER" },
+  { index: 2, labelEn: "Turn your head slightly LEFT", labelBn: "Hold still at slight left angle", tag: "SLIGHT_LEFT" },
+  { index: 3, labelEn: "Turn your head slightly RIGHT", labelBn: "Hold still at slight right angle", tag: "SLIGHT_RIGHT" },
+  { index: 4, labelEn: "Look slightly UP", labelBn: "Hold still at slight upward angle", tag: "SLIGHT_UP" },
+  { index: 5, labelEn: "Look slightly DOWN", labelBn: "Hold still at slight downward angle", tag: "SLIGHT_DOWN" },
 ];
+
 
 export default function FaceRegistrationScreen({ navigation }: { navigation: any }) {
   const { user, refreshProfile } = useAuth();
@@ -64,7 +65,8 @@ export default function FaceRegistrationScreen({ navigation }: { navigation: any
   const laserAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  const employeeId = user?.employeeCode || user?.id || "EMP-0001";
+  const employeeId = user?.id || user?.employeeCode || user?.email || "EMP-0001";
+
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -181,9 +183,9 @@ export default function FaceRegistrationScreen({ navigation }: { navigation: any
         if (cameraRef.current) {
           try {
             const snap = await cameraRef.current.takePictureAsync({
-              quality: 0.3,
+              quality: 0.5,
               base64: true,
-              skipProcessing: true,
+              skipProcessing: false,
               shutterSound: false,
               exif: false,
             });
@@ -191,6 +193,7 @@ export default function FaceRegistrationScreen({ navigation }: { navigation: any
             base64Data = snap?.base64;
           } catch (camErr) {}
         }
+
 
         // ArcFace ভেক্টর এক্সট্রাক্ট
         const embeddingResult = await faceRecognitionService.generateFaceEmbedding(
@@ -239,19 +242,26 @@ export default function FaceRegistrationScreen({ navigation }: { navigation: any
         throw new Error("Centroid vector calculation failed.");
       }
 
-      // Backend Enrollment
-      await faceApi.registerFace({
+      // Backend Database Enrollment (Mandatory)
+      const regRes = await faceApi.registerFace({
         employeeId,
         embedding: masterTemplate,
         sampleCount: valid.length,
-      }).catch(() => {});
+      });
+
+      if (!regRes?.success) {
+        throw new Error("Failed to save face profile to the central database. Please retry.");
+      }
+
+      console.log("[FaceRegistration] Backend DB enrollment success:", regRes);
 
       // Save to Local Biometric Cache
-      await attendanceService.saveRegisteredFace(
-        "local_biometric_template",
-        user?.fullName || "Employee",
-        masterTemplate
-      );
+      await attendanceService.saveRegisteredFace({
+        registered: true,
+        registeredAt: new Date().toISOString(),
+        name: user?.fullName || "Employee",
+        faceDescriptor: masterTemplate,
+      });
 
       await refreshProfile().catch(() => {});
 
@@ -259,6 +269,7 @@ export default function FaceRegistrationScreen({ navigation }: { navigation: any
         triggerHaptic();
         setState("SUCCESS");
       }
+
     } catch (err: any) {
       if (isMountedRef.current) {
         setErrorMessage(err.message || "Registration failed. Please try again.");

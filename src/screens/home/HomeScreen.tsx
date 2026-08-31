@@ -28,11 +28,13 @@ import {
 } from "lucide-react-native";
 import { useAuth } from "../../context/AuthContext";
 import { attendanceService, OFFICE_TIMINGS, TodayPunchState, RegisteredFaceData } from "../../services/attendanceService";
+import { branchApi, BranchLocationData } from "../../api/branch";
 
 export default function HomeScreen({ navigation }: { navigation: any }) {
   const { user } = useAuth();
   const [todayPunch, setTodayPunch] = useState<TodayPunchState | null>(null);
   const [faceData, setFaceData] = useState<RegisteredFaceData>({ registered: false });
+  const [branchData, setBranchData] = useState<BranchLocationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState<string>(
@@ -55,12 +57,16 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 
   const fetchData = async () => {
     try {
-      const [punch, face] = await Promise.all([
+      const [punch, face, branchRes] = await Promise.all([
         attendanceService.getTodayPunch(),
         attendanceService.getRegisteredFace(),
+        branchApi.getBranchLocation().catch(() => null),
       ]);
       setTodayPunch(punch);
       setFaceData(face);
+      if (branchRes?.success && branchRes?.data) {
+        setBranchData(branchRes.data);
+      }
     } catch (e) {
       console.log("Home data fetch:", e);
     } finally {
@@ -92,6 +98,8 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   const isCheckedIn = todayPunch?.hasPunchedIn || false;
   const isCheckedOut = todayPunch?.hasPunchedOut || false;
 
+  const currentBranchName = branchData?.branchName || user?.branch || "Office";
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -116,11 +124,12 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
               <View style={[styles.tagPill, { backgroundColor: "#F1F5F9" }]}>
                 <MapPin size={11} color="#64748B" />
                 <Text style={[styles.tagPillText, { color: "#64748B" }]}>
-                  {user?.branch || "Office HQ"}
+                  {currentBranchName}
                 </Text>
               </View>
             </View>
           </View>
+
 
           <TouchableOpacity
             style={styles.profileBadge}
@@ -142,15 +151,20 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         <View style={styles.shiftBanner}>
           <View style={styles.shiftBannerLeft}>
             <Clock size={16} color="#00B050" />
-            <Text style={styles.shiftBannerTitle}>Official Shift Time:</Text>
+            <Text style={styles.shiftBannerTitle}>
+              {(user as any)?.shiftName ? `${(user as any).shiftName}:` : "Official Shift Time:"}
+            </Text>
             <Text style={styles.shiftBannerTime}>
-              {OFFICE_TIMINGS.shiftStart} - {OFFICE_TIMINGS.shiftEnd}
+              {(user as any)?.shift || ((user as any)?.shiftStart ? `${(user as any).shiftStart} - ${(user as any).shiftEnd}` : `${OFFICE_TIMINGS.shiftStart} - ${OFFICE_TIMINGS.shiftEnd}`)}
             </Text>
           </View>
           <View style={styles.gracePill}>
-            <Text style={styles.gracePillText}>15m Grace</Text>
+            <Text style={styles.gracePillText}>
+              {(user as any)?.shiftGracePeriod ? `${(user as any).shiftGracePeriod}m Grace` : "15m Grace"}
+            </Text>
           </View>
         </View>
+
 
         {/* Live Clock & Punch Card */}
         <View style={styles.punchCard}>
@@ -218,18 +232,25 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           <TouchableOpacity
             style={[
               styles.punchBtn,
-              isCheckedIn && !isCheckedOut ? styles.btnCheckout : styles.btnCheckin,
+              isCheckedIn && !isCheckedOut
+                ? styles.btnCheckout
+                : isCheckedOut
+                ? [styles.btnCheckin, { backgroundColor: "#0F172A" }]
+                : styles.btnCheckin,
             ]}
             onPress={() => navigation.navigate("CheckIn")}
             activeOpacity={0.85}
           >
-            <Camera size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+            <MapPin size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
             <Text style={styles.punchBtnText}>
               {isCheckedIn && !isCheckedOut
-                ? "Punch Check-Out (Face ID)"
-                : "AI Biometric Check-In"}
+                ? "Punch Check-Out"
+                : isCheckedOut
+                ? "Shift Completed · View Status"
+                : "GPS Geofence Check-In"}
             </Text>
           </TouchableOpacity>
+
         </View>
 
         {/* Digital ID Card & Biometric Status Card */}
@@ -241,10 +262,11 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
             <View>
               <Text style={styles.idQuickTitle}>Digital Employee ID</Text>
               <Text style={styles.idQuickSub}>
-                {faceData.registered ? "Face Biometric Verified & Active" : "Face registration pending"}
+                Official Active Digital Card
               </Text>
             </View>
           </View>
+
           <TouchableOpacity
             style={styles.idQuickBtn}
             onPress={() => navigation.navigate("IDCard")}

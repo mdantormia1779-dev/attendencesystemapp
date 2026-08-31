@@ -17,6 +17,7 @@
     },
     "android": {
       "package": "com.smartattendance.employee",
+      "usesCleartextTraffic": true,
       "splash": {
         "image": "./assets/splash.png",
         "resizeMode": "contain",

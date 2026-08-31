@@ -17,7 +17,7 @@ export function normalizeL2(vector: number[]): number[] {
   return vector.map((val) => val / norm);
 }
 
-// Cosine Similarity: Dot product of normalized vectors
+// Cosine Similarity: Dot product of normalized unit vectors (-1.0 to 1.0)
 export function computeCosineSimilarity(a: number[], b: number[]): number {
   if (!a || !b || a.length !== b.length || a.length === 0) return 0;
 
@@ -29,9 +29,9 @@ export function computeCosineSimilarity(a: number[], b: number[]): number {
     dot += normA[i] * normB[i];
   }
 
-  // বাউন্ডিং [-1, 1] থেকে [0, 1] স্কেল
-  return Math.max(0, Math.min(1, (dot + 1) / 2));
+  return Math.max(-1, Math.min(1, dot));
 }
+
 
 export function computeEuclideanDistance(a: number[], b: number[]): number {
   if (!a || !b || a.length !== b.length) return 99;

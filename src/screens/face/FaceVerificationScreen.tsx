@@ -24,9 +24,9 @@ import { aggregateEmbeddings, filterConsistentEmbeddings } from "../../utils/cos
 import { FaceCamera } from "../../components/face/FaceCamera";
 
 const ENROLLMENT_STEPS = [
-  { index: 1, labelEn: "Look straight at the camera", labelBn: "সোজা ক্যামেরার দিকে তাকান" },
-  { index: 2, labelEn: "Turn your head slightly LEFT", labelBn: "সামান্য বাঁয়ে তাকান" },
-  { index: 3, labelEn: "Turn your head slightly RIGHT", labelBn: "সামান্য ডানে তাকান" },
+  { index: 1, labelEn: "Look straight at the camera", labelBn: "Keep face steady and centered" },
+  { index: 2, labelEn: "Turn your head slightly LEFT", labelBn: "Hold still at slight left angle" },
+  { index: 3, labelEn: "Turn your head slightly RIGHT", labelBn: "Hold still at slight right angle" },
 ];
 
 export default function FaceVerificationScreen({ navigation }: { navigation: any }) {
@@ -47,7 +47,7 @@ export default function FaceVerificationScreen({ navigation }: { navigation: any
   const laserAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  const employeeId = user?.employeeCode || user?.id || "EMP-0001";
+  const employeeId = user?.id || user?.employeeCode || user?.email || "EMP-0001";
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -108,7 +108,7 @@ export default function FaceVerificationScreen({ navigation }: { navigation: any
   };
 
   /**
-   * স্বয়ংক্রিয় ৩-স্টেপ ফেস স্ক্যান (জিরো সাউন্ড / ভিডিও ফিল)
+   * Progressive multi-step face scan
    */
   const startProgressiveEnrollment = (stepNum: number, currentCollection: number[][]) => {
     if (!isMountedRef.current) return;
@@ -127,9 +127,9 @@ export default function FaceVerificationScreen({ navigation }: { navigation: any
         if (cameraRef.current) {
           try {
             const snap = await cameraRef.current.takePictureAsync({
-              quality: 0.3,
+              quality: 0.5,
               base64: true,
-              skipProcessing: true,
+              skipProcessing: false,
               shutterSound: false,
               exif: false,
             });
@@ -137,6 +137,7 @@ export default function FaceVerificationScreen({ navigation }: { navigation: any
             base64Data = snap?.base64;
           } catch {}
         }
+
 
         const probe = await faceRecognitionService.extractEmbedding(photoUri, undefined, base64Data);
 
@@ -188,13 +189,15 @@ export default function FaceVerificationScreen({ navigation }: { navigation: any
   const finalizeEnrollment = async (embeddings: number[][]) => {
     try {
       const descriptor = aggregateEmbeddings(embeddings);
-      await attendanceService.enrollFace({
-        employeeId,
-        descriptor,
+      await attendanceService.saveRegisteredFace({
+        registered: true,
         registeredAt: new Date().toISOString(),
+        name: user?.fullName || "Employee",
+        faceDescriptor: descriptor,
       });
 
       await refreshProfile().catch(() => {});
+
 
       if (isMountedRef.current) {
         triggerHaptic();
