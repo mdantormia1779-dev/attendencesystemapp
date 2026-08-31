@@ -30,16 +30,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const storedToken = await AsyncStorage.getItem("auth_token");
       const storedUser = await AsyncStorage.getItem("auth_user");
+
       if (storedToken) {
         setToken(storedToken);
         if (storedUser) {
           setUser(JSON.parse(storedUser));
         }
-        // Fetch fresh profile
-        const res = await authApi.getProfile();
-        if (res.success && res.data) {
-          setUser(res.data);
-          await AsyncStorage.setItem("auth_user", JSON.stringify(res.data));
+
+        // সার্ভার থেকে লেটেস্ট ফ্রেশ প্রোফাইল ডেটা রিফ্রেশ
+        try {
+          const res: any = await authApi.getProfile();
+          const freshUser = res?.data || (res?.fullName ? res : null);
+          if (freshUser) {
+            setUser(freshUser);
+            await AsyncStorage.setItem("auth_user", JSON.stringify(freshUser));
+          }
+        } catch (err) {
+          console.log("Profile refresh notice during boot:", err);
         }
       }
     } catch (e) {
@@ -55,15 +62,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, pass: string) => {
     try {
-      const res = await authApi.login({ email, password: pass });
-      if (res.success && res.data?.token) {
-        setToken(res.data.token);
-        setUser(res.data.user);
-        await AsyncStorage.setItem("auth_token", res.data.token);
-        await AsyncStorage.setItem("auth_user", JSON.stringify(res.data.user));
+      const res: any = await authApi.login({ email, password: pass });
+
+      // রেসপন্স অবজেক্ট থেকে টোকেন ও ইউজার এক্সট্রাক্ট
+      const activeToken = res?.data?.token || res?.token;
+      const initialUser = res?.data?.user || res?.user;
+
+      if (activeToken) {
+        setToken(activeToken);
+        await AsyncStorage.setItem("auth_token", activeToken);
+
+        let finalUser = initialUser;
+
+        // লগইন সফল হলে সরাসরি প্রোফাইল থেকে পুরো ডেটা সিঙ্ক করা
+        try {
+          const profileRes: any = await authApi.getProfile();
+          const fullProfile = profileRes?.data || (profileRes?.fullName ? profileRes : null);
+          if (fullProfile) {
+            finalUser = { ...initialUser, ...fullProfile };
+          }
+        } catch (pErr) {
+          console.log("Full profile sync notice on login:", pErr);
+        }
+
+        if (finalUser) {
+          setUser(finalUser);
+          await AsyncStorage.setItem("auth_user", JSON.stringify(finalUser));
+        }
+
         return { success: true };
       }
-      return { success: false, message: res.message || "Invalid credentials" };
+
+      return { success: false, message: res?.message || "Invalid credentials" };
     } catch (e: any) {
       return { success: false, message: e.message || "Login failed" };
     }
@@ -78,10 +108,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshProfile = async () => {
     try {
-      const res = await authApi.getProfile();
-      if (res.success && res.data) {
-        setUser(res.data);
-        await AsyncStorage.setItem("auth_user", JSON.stringify(res.data));
+      const res: any = await authApi.getProfile();
+      const freshUser = res?.data || (res?.fullName ? res : null);
+      if (freshUser) {
+        setUser((prev) => ({ ...prev, ...freshUser }));
+        await AsyncStorage.setItem("auth_user", JSON.stringify(freshUser));
       }
     } catch (e) {
       console.error("Failed to refresh profile:", e);

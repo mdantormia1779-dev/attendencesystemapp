@@ -25,6 +25,7 @@ import { OFFICE_TIMINGS } from "../../services/attendanceService";
 
 export default function IDCardScreen({ navigation }: { navigation: any }) {
   const { user } = useAuth();
+  console.log(user)
 
   const employeeName = user?.fullName || user?.name || "Arif Chowdhury";
   const employeeCode = user?.employeeCode || "EMP-1029";

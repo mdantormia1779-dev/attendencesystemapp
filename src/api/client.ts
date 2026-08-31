@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native"; // added for Android detection
 
 // Primary Local Network IP of the Next.js backend server
-export const DEFAULT_API_BASE_URL = "http://192.168.0.164:3000";
+export const DEFAULT_API_BASE_URL = "https://antorsmartattendencesystem.vercel.app";
 
 // Fallback host candidates for Android Emulator, Localhost, etc.
 const FALLBACK_HOSTS = Platform.OS === "android"

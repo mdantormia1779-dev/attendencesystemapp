@@ -5,7 +5,29 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-
+    "icon": "./assets/splash.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#00B050"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.smartattendance.employee"
+    },
+    "android": {
+      "package": "com.smartattendance.employee",
+      "splash": {
+        "image": "./assets/splash.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#00B050"
+      },
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
     "plugins": [
       [
         "expo-camera",
@@ -18,29 +40,7 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Smart Attendance to use location."
         }
-      ],
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/splash.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#00B050"
-        }
       ]
-    ],
-
-    "android": {
-      "package": "com.smartattendance.employee",
-      "useCleartextTraffic": true,
-      "permissions": [
-        "CAMERA",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
-      ]
-    },
-
-    "ios": {
-      "bundleIdentifier": "com.smartattendance.employee"
-    }
+    ]
   }
 }

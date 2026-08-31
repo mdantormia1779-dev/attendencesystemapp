@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -18,30 +20,70 @@ import {
   LogOut,
   ChevronRight,
   Briefcase,
-  Sparkles,
   MapPin,
   QrCode,
   Calendar,
+  Phone,
+  Mail,
 } from "lucide-react-native";
 import { useAuth } from "../../context/AuthContext";
 import { attendanceService, OFFICE_TIMINGS, RegisteredFaceData } from "../../services/attendanceService";
+import { authApi } from "../../api/auth";
+import { branchApi } from "../../api/branch";
 
 export default function ProfileScreen({ navigation }: { navigation: any }) {
   const { user, logout } = useAuth();
+  const [profileDetails, setProfileDetails] = useState<any>(null);
+  const [branchInfo, setBranchInfo] = useState<any>(null);
   const [faceData, setFaceData] = useState<RegisteredFaceData>({ registered: false });
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
 
-  const loadFaceData = async () => {
-    const data = await attendanceService.getRegisteredFace();
-    setFaceData(data);
+  const fetchCompleteUserInfo = async () => {
+    try {
+      // 1. Fetch full employee details from /api/auth/me
+      const profileRes: any = await authApi.getProfile();
+      if (profileRes?.success && profileRes?.data) {
+        setProfileDetails(profileRes.data);
+      } else if (profileRes && (profileRes.fullName || profileRes.email)) {
+        setProfileDetails(profileRes);
+      }
+
+      // 2. Fetch assigned branch info
+      try {
+        const branchRes = await branchApi.getBranchLocation();
+        console.log(branchRes)
+        if (branchRes?.success && branchRes?.data) {
+          setBranchInfo(branchRes.data);
+        }
+      } catch (bErr) {
+        console.log("Branch fetch note:", bErr);
+      }
+
+      // 3. Fetch face biometrics status
+      const face = await attendanceService.getRegisteredFace();
+      setFaceData(face);
+    } catch (err) {
+      console.log("Error loading full profile info:", err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
-    loadFaceData();
+    fetchCompleteUserInfo();
+
     const unsubscribe = navigation.addListener("focus", () => {
-      loadFaceData();
+      fetchCompleteUserInfo();
     });
     return unsubscribe;
   }, [navigation]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchCompleteUserInfo();
+  }, []);
 
   const handleLogout = () => {
     Alert.alert("Sign Out", "Are you sure you want to sign out of Smart Attendance?", [
@@ -49,6 +91,38 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
       { text: "Sign Out", style: "destructive", onPress: logout },
     ]);
   };
+
+  // Profile Data Mapping with intelligent fallbacks
+  const displayName = profileDetails?.fullName || user?.fullName || user?.name || "MD ANTOR MIA";
+  const displayEmail = profileDetails?.email || user?.email || "antor@gmail.com";
+  
+  // Format code from raw userId (emp-1788119345526-469 -> EMP-469)
+  const employeeIdRaw = profileDetails?.id || profileDetails?.userId || user?.userId || "emp-1788119345526-469";
+  const displayCode = profileDetails?.employeeCode 
+    || user?.employeeCode 
+    || `EMP-${employeeIdRaw.split("-").pop()}`;
+
+  const displayDesignation = profileDetails?.designation 
+    || user?.designation 
+    || (user?.role === "EMPLOYEE" ? "Front-End Web Developer" : "System Administrator");
+
+  const displayDepartment = profileDetails?.department 
+    || user?.department 
+    || "Engineering & Tech";
+
+  const displayBranch = branchInfo?.branchName 
+    || profileDetails?.branch?.name 
+    || user?.branch 
+    || "Main HQ Office";
+
+  const displayRadius = branchInfo?.geofenceRadius 
+    || profileDetails?.geofenceRadius 
+    || 120;
+
+  const displayPhone = profileDetails?.phone || user?.phone || "+880 1700-000000";
+  const displayJoinDate = profileDetails?.createdAt 
+    ? new Date(profileDetails.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : "15 Jan 2024";
 
   return (
     <SafeAreaView style={styles.container}>
@@ -65,25 +139,42 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
         <View style={{ width: 38 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#00B050"]} />}
+      >
+        {loading && !refreshing ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="small" color="#00B050" />
+            <Text style={styles.loadingText}>Loading profile data...</Text>
+          </View>
+        ) : null}
+
         {/* Profile Identity Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>
-              {(user?.fullName || "EM").substring(0, 2).toUpperCase()}
+              {displayName
+                .split(" ")
+                .filter(Boolean)
+                .map((n: string) => n[0])
+                .join("")
+                .slice(0, 2)
+                .toUpperCase()}
             </Text>
           </View>
-          <Text style={styles.name}>{user?.fullName || user?.name || "Arif Chowdhury"}</Text>
+          <Text style={styles.name}>{displayName}</Text>
           <Text style={styles.code}>
-            {user?.employeeCode || "EMP-1029"} · {user?.designation || "Senior Software Engineer"}
+            {displayCode} · {displayDesignation}
           </Text>
-          <Text style={styles.email}>{user?.email || "arif.c@vertextech.io"}</Text>
+          <Text style={styles.email}>{displayEmail}</Text>
 
           <View style={styles.badgeContainer}>
-            <View style={styles.statusPill}>
-              <ShieldCheck size={13} color="#00B050" />
-              <Text style={styles.statusPillText}>
-                {faceData.registered ? "Face Biometric Active" : "Face ID Pending Setup"}
+            <View style={[styles.statusPill, !faceData.registered && styles.statusPillPending]}>
+              <ShieldCheck size={13} color={faceData.registered ? "#00B050" : "#D97706"} />
+              <Text style={[styles.statusPillText, !faceData.registered && styles.statusPillTextPending]}>
+                {faceData.registered ? "Face Biometric Active" : "Face Biometric Pending Setup"}
               </Text>
             </View>
           </View>
@@ -109,7 +200,7 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
 
           <TouchableOpacity
             style={[styles.menuRow, { borderBottomWidth: 0 }]}
-            onPress={() => navigation.navigate("FaceRegistration")}
+            onPress={() => navigation.navigate("FaceRegister")}
             activeOpacity={0.7}
           >
             <View style={[styles.menuIconBox, { backgroundColor: "#EFF6FF" }]}>
@@ -133,7 +224,7 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
               <Briefcase size={16} color="#64748B" />
               <Text style={styles.infoLabel}>Department</Text>
             </View>
-            <Text style={styles.infoVal}>{user?.department || "Engineering & AI Tech"}</Text>
+            <Text style={styles.infoVal}>{displayDepartment}</Text>
           </View>
 
           <View style={styles.infoRow}>
@@ -141,7 +232,7 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
               <Building2 size={16} color="#64748B" />
               <Text style={styles.infoLabel}>Branch Office</Text>
             </View>
-            <Text style={styles.infoVal}>{user?.branch || "Main HQ Office"}</Text>
+            <Text style={styles.infoVal}>{displayBranch}</Text>
           </View>
 
           <View style={styles.infoRow}>
@@ -152,13 +243,45 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
             <Text style={styles.infoVal}>{OFFICE_TIMINGS.shiftStart} - {OFFICE_TIMINGS.shiftEnd}</Text>
           </View>
 
+          <View style={styles.infoRow}>
+            <View style={styles.infoLeft}>
+              <Calendar size={16} color="#64748B" />
+              <Text style={styles.infoLabel}>Join Date</Text>
+            </View>
+            <Text style={styles.infoVal}>{displayJoinDate}</Text>
+          </View>
+
           <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
             <View style={styles.infoLeft}>
               <MapPin size={16} color="#00B050" />
               <Text style={styles.infoLabel}>Geofence Radius</Text>
             </View>
             <Text style={[styles.infoVal, { color: "#00B050", fontWeight: "800" }]}>
-              100m Perimeter Active
+              {displayRadius}m Perimeter Active
+            </Text>
+          </View>
+        </View>
+
+        {/* System & Identity Details */}
+        <Text style={styles.sectionTitle}>System Identifiers</Text>
+        <View style={styles.infoCard}>
+          <View style={styles.infoRow}>
+            <View style={styles.infoLeft}>
+              <User size={16} color="#64748B" />
+              <Text style={styles.infoLabel}>User ID</Text>
+            </View>
+            <Text style={[styles.infoVal, { fontSize: 11, color: "#64748B" }]}>
+              {employeeIdRaw}
+            </Text>
+          </View>
+
+          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+            <View style={styles.infoLeft}>
+              <Building2 size={16} color="#64748B" />
+              <Text style={styles.infoLabel}>Organization ID</Text>
+            </View>
+            <Text style={[styles.infoVal, { fontSize: 11, color: "#64748B" }]}>
+              {profileDetails?.organizationId || user?.organizationId || "org-1788097016300"}
             </Text>
           </View>
         </View>
@@ -205,6 +328,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 36,
+  },
+  loadingBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  loadingText: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "600",
   },
   profileCard: {
     backgroundColor: "#FFFFFF",
@@ -269,10 +404,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#A7F3D0",
   },
+  statusPillPending: {
+    backgroundColor: "#FEF3C7",
+    borderColor: "#FDE68A",
+  },
   statusPillText: {
     color: "#059669",
     fontSize: 11,
     fontWeight: "800",
+  },
+  statusPillTextPending: {
+    color: "#D97706",
   },
   sectionTitle: {
     fontSize: 15,
@@ -329,7 +471,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    marginBottom: 24,
+    marginBottom: 20,
     shadowColor: "#0F172A",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.02,
@@ -368,6 +510,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
+    marginTop: 6,
   },
   logoutBtnText: {
     color: "#E11D48",
