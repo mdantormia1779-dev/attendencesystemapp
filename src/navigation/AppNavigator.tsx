@@ -17,6 +17,10 @@ import ProfileScreen from "../screens/profile/ProfileScreen";
 import FaceRegisterScreen from "../screens/profile/FaceRegisterScreen";
 import IDCardScreen from "../screens/profile/IDCardScreen";
 import ReferralsScreen from "../screens/referrals/ReferralsScreen";
+import TasksScreen from "../screens/tasks/TasksScreen";
+import TaskDetailsScreen from "../screens/tasks/TaskDetailsScreen";
+import FaceVerificationScreen from "../screens/face/FaceVerificationScreen";
+import NotificationsScreen from "../screens/notifications/NotificationsScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -48,9 +52,12 @@ export default function AppNavigator() {
           <Stack.Screen name="Salary" component={SalaryScreen} />
           <Stack.Screen name="Profile" component={ProfileScreen} />
           <Stack.Screen name="FaceRegistration" component={FaceRegisterScreen} />
-          <Stack.Screen name="FaceVerification" component={require("../screens/face/FaceVerificationScreen").default} />
+          <Stack.Screen name="FaceVerification" component={FaceVerificationScreen} />
           <Stack.Screen name="IDCard" component={IDCardScreen} />
           <Stack.Screen name="Referrals" component={ReferralsScreen} />
+          <Stack.Screen name="Tasks" component={TasksScreen} />
+          <Stack.Screen name="TaskDetails" component={TaskDetailsScreen} />
+          <Stack.Screen name="Notifications" component={NotificationsScreen} />
         </>
       )}
     </Stack.Navigator>

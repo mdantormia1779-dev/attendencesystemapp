@@ -434,7 +434,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  processingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15,23,42,0.4)" },
+  processingOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15,23,42,0.4)" },
   dotsRow: { flexDirection: "row", justifyContent: "center", gap: 8, marginTop: 18 },
   dot: { width: 9, height: 9, borderRadius: 5, backgroundColor: "rgba(255, 255, 255, 0.25)" },
   dotCurrent: { backgroundColor: "#22C55E", width: 24 },

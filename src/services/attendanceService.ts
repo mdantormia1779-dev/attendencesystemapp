@@ -35,6 +35,8 @@ export interface TodayPunchState {
   overtimeHours: number;
   locationStatus: "IN_OFFICE" | "REMOTE" | "OUTSIDE_RADIUS";
   photoUri?: string;
+  verificationMethod?: "FACE_RECOGNITION" | "BIOMETRIC_DEVICE" | "GPS_GEOFENCE" | "MANUAL_OVERRIDE";
+  faceMatchScore?: number;
 }
 
 export interface LeaveBalances {
@@ -252,25 +254,52 @@ class AttendanceService {
         const parsed: TodayPunchState = JSON.parse(stored);
         if (parsed.date === todayStr) {
           localState = parsed;
+        } else {
+          // If stored punch is from a previous day, archive it into history and start fresh
+          if (parsed.hasPunchedIn) {
+            await this.updateAttendanceHistory(parsed).catch(() => {});
+          }
+          await AsyncStorage.setItem(KEYS.TODAY_PUNCH, JSON.stringify(localState)).catch(() => {});
         }
       }
     } catch (e) {
       await AsyncStorage.removeItem(KEYS.TODAY_PUNCH).catch(() => {});
     }
 
-    // Sync from database if available
+    // Sync from database for today's status
     try {
       const empId = await this.getCurrentEmployeeId();
       const dbRes = await attendanceApi.getTodayStatus(empId).catch(() => null);
       if (dbRes?.success && dbRes?.data) {
         const d = dbRes.data;
+        const hasIn = Boolean(d.hasPunchedIn);
+        const hasOut = Boolean(d.hasPunchedOut);
+
+        if (!hasIn) {
+          // New day, no punch yet today
+          const freshDayState: TodayPunchState = {
+            hasPunchedIn: false,
+            hasPunchedOut: false,
+            date: todayStr,
+            status: "NOT_YET",
+            workedHours: 0,
+            overtimeHours: 0,
+            locationStatus: "IN_OFFICE",
+          };
+          await AsyncStorage.setItem(KEYS.TODAY_PUNCH, JSON.stringify(freshDayState)).catch(() => {});
+          return freshDayState;
+        }
+
+        const inTimestamp = d.checkInTimestamp || (localState.hasPunchedIn ? localState.checkInTimestamp : undefined);
+        const outTimestamp = d.checkOutTimestamp || (localState.hasPunchedOut ? localState.checkOutTimestamp : undefined);
+
         const syncedState: TodayPunchState = {
-          hasPunchedIn: Boolean(d.hasPunchedIn),
-          hasPunchedOut: Boolean(d.hasPunchedOut),
-          checkInTime: d.checkInTime || localState.checkInTime,
-          checkInTimestamp: d.checkInTimestamp || localState.checkInTimestamp,
-          checkOutTime: d.checkOutTime || localState.checkOutTime,
-          checkOutTimestamp: d.checkOutTimestamp || localState.checkOutTimestamp,
+          hasPunchedIn: hasIn,
+          hasPunchedOut: hasOut,
+          checkInTime: inTimestamp ? this.formatTime(new Date(inTimestamp)) : (localState.checkInTime || d.checkInTime),
+          checkInTimestamp: inTimestamp,
+          checkOutTime: outTimestamp ? this.formatTime(new Date(outTimestamp)) : (localState.checkOutTime || d.checkOutTime),
+          checkOutTimestamp: outTimestamp,
           date: todayStr,
           status: d.status || localState.status || "PRESENT",
           workedHours: typeof d.workedHours === "number" ? d.workedHours : localState.workedHours,
@@ -285,7 +314,13 @@ class AttendanceService {
     return localState;
   }
 
-  async punchIn(photoUri?: string, lat = 23.8103, lng = 90.4125): Promise<TodayPunchState> {
+  async punchIn(
+    photoUri?: string,
+    lat = 23.8103,
+    lng = 90.4125,
+    verificationMethod: "FACE_RECOGNITION" | "BIOMETRIC_DEVICE" | "GPS_GEOFENCE" | "MANUAL_OVERRIDE" = "GPS_GEOFENCE",
+    faceScore?: number
+  ): Promise<TodayPunchState> {
     const now = new Date();
     const todayStr = this.formatDate(now);
     const timeStr = this.formatTime(now);
@@ -334,6 +369,8 @@ class AttendanceService {
       overtimeHours: 0,
       locationStatus: "IN_OFFICE",
       photoUri: photoUri && !photoUri.startsWith("data:") ? photoUri : undefined,
+      verificationMethod: verificationMethod || "GPS_GEOFENCE",
+      faceMatchScore: faceScore,
     };
 
     try {
@@ -346,10 +383,13 @@ class AttendanceService {
         employeeId,
         latitude: lat,
         longitude: lng,
-        verificationMethod: "GPS_GEOFENCE",
+        verificationMethod: verificationMethod || "GPS_GEOFENCE",
       });
       if (apiRes?.data) {
-        state.checkInTime = apiRes.data.checkInTime || state.checkInTime;
+        if (apiRes.data.checkInTimestamp) {
+          state.checkInTime = this.formatTime(new Date(apiRes.data.checkInTimestamp));
+          state.checkInTimestamp = apiRes.data.checkInTimestamp;
+        }
         state.status = apiRes.data.status || state.status;
         await AsyncStorage.setItem(KEYS.TODAY_PUNCH, JSON.stringify(state)).catch(() => {});
       }
@@ -360,7 +400,13 @@ class AttendanceService {
     return state;
   }
 
-  async punchOut(photoUri?: string, lat = 23.8103, lng = 90.4125): Promise<TodayPunchState> {
+  async punchOut(
+    photoUri?: string,
+    lat = 23.8103,
+    lng = 90.4125,
+    verificationMethod: "FACE_RECOGNITION" | "BIOMETRIC_DEVICE" | "GPS_GEOFENCE" | "MANUAL_OVERRIDE" = "GPS_GEOFENCE",
+    faceScore?: number
+  ): Promise<TodayPunchState> {
     const now = new Date();
     const timeStr = this.formatTime(now);
     const today = await this.getTodayPunch();
@@ -383,6 +429,8 @@ class AttendanceService {
       workedHours,
       overtimeHours,
       photoUri: photoUri && !photoUri.startsWith("data:") ? photoUri : undefined,
+      verificationMethod: verificationMethod || today.verificationMethod || "GPS_GEOFENCE",
+      faceMatchScore: faceScore !== undefined ? faceScore : today.faceMatchScore,
     };
 
     try {
@@ -395,10 +443,13 @@ class AttendanceService {
         employeeId,
         latitude: lat,
         longitude: lng,
-        verificationMethod: "GPS_GEOFENCE",
+        verificationMethod: verificationMethod || "GPS_GEOFENCE",
       });
       if (apiRes?.data) {
-        state.checkOutTime = apiRes.data.checkOutTime || state.checkOutTime;
+        if (apiRes.data.checkOutTimestamp) {
+          state.checkOutTime = this.formatTime(new Date(apiRes.data.checkOutTimestamp));
+          state.checkOutTimestamp = apiRes.data.checkOutTimestamp;
+        }
         if (typeof apiRes.data.workedHours === "number") {
           state.workedHours = apiRes.data.workedHours;
         }
@@ -424,15 +475,31 @@ class AttendanceService {
       if (res.success && Array.isArray(res.data)) {
         const realPunches = res.data.filter((item: any) => item.checkInTime && item.checkInTime !== "-" && item.checkInTime !== "--:--");
 
-        liveLogs = realPunches.map((item: any, idx: number) => ({
-          id: item.id || `punch-${idx}`,
-          date: item.date || "Today",
-          checkInTime: item.checkInTime || "--:--",
-          checkOutTime: item.checkOutTime || null,
-          status: item.status === "LATE" ? "LATE" : "PRESENT",
-          locationStatus: "IN_OFFICE",
-          overtimeHours: item.overtimeHours || 0,
-        }));
+        liveLogs = realPunches.map((item: any, idx: number) => {
+          let inTime = item.checkInTime || "--:--";
+          if (item.checkInTimestamp) {
+            inTime = this.formatTime(new Date(item.checkInTimestamp));
+          } else if (item.timestamp) {
+            inTime = this.formatTime(new Date(item.timestamp));
+          } else if (item.createdAt && typeof item.createdAt === "string" && item.createdAt.includes("T")) {
+            inTime = this.formatTime(new Date(item.createdAt));
+          }
+
+          let outTime = item.checkOutTime || null;
+          if (item.checkOutTimestamp) {
+            outTime = this.formatTime(new Date(item.checkOutTimestamp));
+          }
+
+          return {
+            id: item.id || `punch-${idx}`,
+            date: item.date || "Today",
+            checkInTime: inTime,
+            checkOutTime: outTime,
+            status: item.status === "LATE" ? "LATE" : "PRESENT",
+            locationStatus: "IN_OFFICE",
+            overtimeHours: item.overtimeHours || 0,
+          };
+        });
       }
     } catch (e) {
       console.log("Backend attendance logs fetch notice:", e);

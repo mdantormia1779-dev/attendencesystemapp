@@ -43,7 +43,7 @@ export const FaceCamera: React.FC<FaceCameraProps> = ({
     <View style={styles.container}>
       <CameraView
         ref={cameraRef}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         facing={facing}
         mode="picture"
         enableTorch={false}
@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#000000",
   },
   loaderContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "#000000",
     alignItems: "center",
     justifyContent: "center",
@@ -89,7 +89,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   overlayContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "space-between",
     padding: 20,
     zIndex: 2,

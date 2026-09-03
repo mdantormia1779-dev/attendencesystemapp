@@ -35,33 +35,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (storedToken) {
         setToken(storedToken);
         if (storedUser) {
-          setUser(JSON.parse(storedUser));
+          try {
+            setUser(JSON.parse(storedUser));
+          } catch {}
         }
+        setLoading(false);
 
-        // Refresh latest profile data from server
-        try {
-          const res: any = await authApi.getProfile();
-          const freshUser = res?.data || (res?.fullName ? res : null);
-          if (freshUser) {
-            setUser(freshUser);
-            await AsyncStorage.setItem("auth_user", JSON.stringify(freshUser));
+        // Refresh latest profile data from server in background
+        authApi.getProfile()
+          .then(async (res: any) => {
+            const freshUser = res?.data || (res?.fullName ? res : null);
+            if (freshUser) {
+              setUser(freshUser);
+              await AsyncStorage.setItem("auth_user", JSON.stringify(freshUser));
 
-            // Sync registered biometric template to local cache if present
-            if (freshUser.faceDescriptor && Array.isArray(freshUser.faceDescriptor) && freshUser.faceDescriptor.length === 128) {
-              await attendanceService.saveRegisteredFace(
-                "local_biometric_template",
-                freshUser.fullName || "Employee",
-                freshUser.faceDescriptor
-              );
+              // Sync registered biometric template to local cache if present
+              if (freshUser.faceDescriptor && Array.isArray(freshUser.faceDescriptor) && freshUser.faceDescriptor.length === 128) {
+                await attendanceService.saveRegisteredFace(
+                  "local_biometric_template",
+                  freshUser.fullName || "Employee",
+                  freshUser.faceDescriptor
+                );
+              }
             }
-          }
-        } catch (err) {
-          console.log("Profile refresh notice during boot:", err);
-        }
+          })
+          .catch((err) => {
+            console.log("Profile refresh notice during boot:", err);
+          });
+      } else {
+        setLoading(false);
       }
     } catch (e) {
       console.error("Failed to restore auth session:", e);
-    } finally {
       setLoading(false);
     }
   };

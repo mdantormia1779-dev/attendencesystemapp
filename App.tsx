@@ -1,5 +1,8 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { View } from "react-native";
+import { Buffer } from "buffer";
+(globalThis as any).Buffer = (globalThis as any).Buffer || Buffer;
+
+import React, { useEffect, useState } from "react";
+import { View, StyleSheet, ActivityIndicator } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
 import { NavigationContainer } from "@react-navigation/native";
@@ -7,19 +10,14 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider } from "./src/context/AuthContext";
 import AppNavigator from "./src/navigation/AppNavigator";
 
-// নেটিভ স্প্ল্যাশ স্ক্রিন অটো হাইড হওয়া বন্ধ রাখা
-SplashScreen.preventAutoHideAsync().catch(() => {});
-
 export default function App() {
   const [appIsReady, setAppIsReady] = useState(false);
 
   useEffect(() => {
     async function prepare() {
       try {
-        // এখানে প্রয়োজনীয় প্রি-লোড (Fonts, Auth Check ইত্যাদি) করতে পারেন
-        await new Promise((resolve) => setTimeout(resolve, 1500)); // স্প্ল্যাশ কতক্ষণ দেখাবে
+        await SplashScreen.hideAsync().catch(() => {});
       } catch (e) {
-        console.warn(e);
       } finally {
         setAppIsReady(true);
       }
@@ -28,25 +26,33 @@ export default function App() {
     prepare();
   }, []);
 
-  const onLayoutRootView = useCallback(async () => {
-    if (appIsReady) {
-      // মেইন অ্যাপ রেডি হওয়ার সাথে সাথে স্প্ল্যাশ হাইড হবে
-      await SplashScreen.hideAsync();
-    }
-  }, [appIsReady]);
-
-  if (!appIsReady) {
-    return null;
-  }
-
   return (
-    <SafeAreaProvider onLayout={onLayoutRootView}>
+    <SafeAreaProvider style={styles.container}>
       <AuthProvider>
         <NavigationContainer>
-          <StatusBar style="dark" backgroundColor="#ffffff" />
-          <AppNavigator />
+          <StatusBar style="dark" />
+          {appIsReady ? (
+            <AppNavigator />
+          ) : (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#00B050" />
+            </View>
+          )}
         </NavigationContainer>
       </AuthProvider>
     </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#F8FAFC",
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

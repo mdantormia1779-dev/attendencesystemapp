@@ -25,17 +25,21 @@ import {
   Calendar,
   Phone,
   Mail,
+  Fingerprint,
+  Sparkles,
 } from "lucide-react-native";
 import { useAuth } from "../../context/AuthContext";
 import { attendanceService, OFFICE_TIMINGS, RegisteredFaceData } from "../../services/attendanceService";
 import { authApi } from "../../api/auth";
 import { branchApi } from "../../api/branch";
+import { biometricService, BiometricStatus } from "../../services/biometricService";
 
 export default function ProfileScreen({ navigation }: { navigation: any }) {
   const { user, logout } = useAuth();
   const [profileDetails, setProfileDetails] = useState<any>(null);
   const [branchInfo, setBranchInfo] = useState<any>(null);
   const [faceData, setFaceData] = useState<RegisteredFaceData>({ registered: false });
+  const [biometricStatus, setBiometricStatus] = useState<BiometricStatus | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
@@ -52,7 +56,6 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
       // 2. Fetch assigned branch info
       try {
         const branchRes = await branchApi.getBranchLocation();
-        console.log(branchRes)
         if (branchRes?.success && branchRes?.data) {
           setBranchInfo(branchRes.data);
         }
@@ -60,14 +63,27 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
         console.log("Branch fetch note:", bErr);
       }
 
-      // 3. Fetch face biometrics status
-      const face = await attendanceService.getRegisteredFace();
+      // 3. Fetch face biometrics & device biometric status
+      const [face, bio] = await Promise.all([
+        attendanceService.getRegisteredFace(),
+        biometricService.checkBiometricAvailability(),
+      ]);
       setFaceData(face);
+      setBiometricStatus(bio);
     } catch (err) {
       console.log("Error loading full profile info:", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handleTestBiometric = async () => {
+    const res = await biometricService.authenticateBiometric("Test biometric sensor verification");
+    if (res.success) {
+      Alert.alert("Biometric Verified ✓", "Device biometric sensor authenticated successfully!");
+    } else if (res.error && !res.error.includes("cancelled")) {
+      Alert.alert("Biometric Test", res.error);
     }
   };
 
@@ -173,9 +189,47 @@ export default function ProfileScreen({ navigation }: { navigation: any }) {
           </View>
         </View>
 
-        {/* Digital Credentials & ID Card */}
-        <Text style={styles.sectionTitle}>Digital Credentials</Text>
+        {/* Biometric & Security Credentials */}
+        <Text style={styles.sectionTitle}>Biometric & Security Credentials</Text>
         <View style={styles.menuGroup}>
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={() => navigation.navigate("FaceRegistration")}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconBox, { backgroundColor: isFaceActive ? "#F0FDF4" : "#FFFBEB" }]}>
+              <Camera size={20} color={isFaceActive ? "#00B050" : "#D97706"} />
+            </View>
+            <View style={styles.menuText}>
+              <Text style={styles.menuTitle}>Facial Biometric Template</Text>
+              <Text style={styles.menuSub}>
+                {isFaceActive
+                  ? "ArcFace 128D Registered · Tap to Update"
+                  : "Not Enrolled · Tap to Register Face"}
+              </Text>
+            </View>
+            <ChevronRight size={18} color="#94A3B8" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={handleTestBiometric}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconBox, { backgroundColor: biometricStatus?.isEnrolled ? "#F0FDF4" : "#F8FAFC" }]}>
+              <Fingerprint size={20} color={biometricStatus?.isEnrolled ? "#00B050" : "#64748B"} />
+            </View>
+            <View style={styles.menuText}>
+              <Text style={styles.menuTitle}>{biometricStatus?.typeLabel || "Fingerprint Scanner"}</Text>
+              <Text style={styles.menuSub}>
+                {biometricStatus?.isEnrolled
+                  ? "Device Biometrics Ready · Tap to Test Sensor"
+                  : "No device biometric enrolled in OS settings"}
+              </Text>
+            </View>
+            <ChevronRight size={18} color="#94A3B8" />
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.menuRow}
             onPress={() => navigation.navigate("IDCard")}

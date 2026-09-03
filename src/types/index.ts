@@ -28,6 +28,7 @@ export interface AttendancePunch {
   checkOutTime?: string | null;
   status: "PRESENT" | "LATE" | "ABSENT" | "ON_LEAVE" | "HALF_DAY";
   faceMatchScore?: number;
+  verificationMethod?: "FACE_RECOGNITION" | "BIOMETRIC_DEVICE" | "GPS_GEOFENCE" | "MANUAL_OVERRIDE";
   locationStatus?: "IN_OFFICE" | "REMOTE" | "OUTSIDE_RADIUS";
   deviceInfo?: string;
   overtimeHours?: number;
@@ -103,5 +104,35 @@ export interface ReferralAccount {
   totalEarnings?: number;
   currency?: string;
   withdrawals?: ReferralWithdrawal[];
+}
+
+export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+export type TaskStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+
+export interface TaskItem {
+  id: string;
+  organizationId: string;
+  branchId?: string | null;
+  departmentId?: string | null;
+  employeeId: string;
+  employeeName: string;
+  employeeCode: string;
+  employeeAvatar?: string | null;
+  departmentName?: string;
+  branchName?: string;
+  assignedById: string;
+  assignedByName: string;
+  assignedByRole: "SUPER_ADMIN" | "ORG_ADMIN" | "MANAGER";
+  title: string;
+  description?: string | null;
+  priority: TaskPriority;
+  status: TaskStatus;
+  dueDate?: string | null;
+  startDate?: string | null;
+  completedAt?: string | null;
+  completionNotes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isOverdue?: boolean;
 }
 

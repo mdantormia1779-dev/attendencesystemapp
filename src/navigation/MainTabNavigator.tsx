@@ -1,10 +1,6 @@
-import { Platform } from "react-native";
-import * as NativeIcons from "lucide-react-native";
-import * as WebIcons from "lucide-react";
+import { Platform, StyleSheet, View } from "react-native";
+import { Home, Clock, CalendarDays, Wallet, User } from "lucide-react-native";
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { StyleSheet, View } from 'react-native';
-
-const { Home, Clock, CalendarDays, Wallet, User } = Platform.OS === "web" ? WebIcons : NativeIcons;
 
 // Screen imports
 import HomeScreen from "../screens/home/HomeScreen";

@@ -11,8 +11,10 @@ import {
   Platform,
   Vibration,
   ScrollView,
+  Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { CameraType, useCameraPermissions } from "expo-camera";
 import * as Location from "expo-location";
 import {
   ArrowLeft,
@@ -20,18 +22,38 @@ import {
   MapPin,
   RefreshCw,
   ShieldCheck,
+  ShieldAlert,
   Building2,
   AlertTriangle,
+  Camera as CameraIcon,
+  Fingerprint,
+  Sparkles,
+  FlipHorizontal,
+  UserCheck,
+  Lock,
+  Unlock,
 } from "lucide-react-native";
 import { useAuth } from "../../context/AuthContext";
-import { attendanceService, TodayPunchState } from "../../services/attendanceService";
+import { attendanceService, TodayPunchState, RegisteredFaceData } from "../../services/attendanceService";
 import { branchApi, BranchLocationData } from "../../api/branch";
 import { validateGeofence } from "../../utils/geoUtils";
+import { biometricService, BiometricStatus } from "../../services/biometricService";
+import { faceRecognitionService } from "../../services/faceRecognitionService";
+import { FaceCamera } from "../../components/face/FaceCamera";
 
-export default function CheckInScreen({ navigation }: { navigation: any }) {
+const { width } = Dimensions.get("window");
+
+export type BiometricMode = "FACE" | "FINGERPRINT";
+
+export default function CheckInScreen({ navigation, route }: { navigation: any; route?: any }) {
   const { user } = useAuth();
-  const [step, setStep] = useState<"LOCATION" | "SUCCESS">("LOCATION");
+  const initialMode: BiometricMode = route?.params?.mode === "FINGERPRINT" ? "FINGERPRINT" : "FACE";
+
+  const [activeBiometric, setActiveBiometric] = useState<BiometricMode>(initialMode);
+  const [step, setStep] = useState<"VERIFY" | "SUCCESS">("VERIFY");
   const [loadingLoc, setLoadingLoc] = useState(true);
+
+  // GPS & Branch Geofence State
   const [gpsData, setGpsData] = useState<{
     latitude: number;
     longitude: number;
@@ -44,24 +66,57 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
     longitude: 0,
     accuracy: null,
     distanceMeters: 0,
-    branchName: "Loading branch...",
+    branchName: "Locating office branch...",
     isInside: false,
   });
 
   const [branchLocation, setBranchLocation] = useState<BranchLocationData | null>(null);
   const branchLocationRef = useRef<BranchLocationData | null>(null);
 
+  // Punch State
   const [submitting, setSubmitting] = useState(false);
   const [punchResult, setPunchResult] = useState<TodayPunchState | null>(null);
   const [punchType, setPunchType] = useState<"IN" | "OUT">("IN");
 
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  // Face Verification State
+  const [permission, requestPermission] = useCameraPermissions();
+  const [facing, setFacing] = useState<CameraType>("front");
+  const [faceData, setFaceData] = useState<RegisteredFaceData>({ registered: false });
+  const [faceVerifying, setFaceVerifying] = useState(false);
+  const [faceFeedback, setFaceFeedback] = useState<string>("Keep face centered in frame");
+  const [faceMatched, setFaceMatched] = useState<boolean | null>(null);
+  const [faceScore, setFaceScore] = useState<number>(0);
+  const cameraRef = useRef<any>(null);
+
+  // Fingerprint State
+  const [biometricStatus, setBiometricStatus] = useState<BiometricStatus | null>(null);
+  const [biometricChecking, setBiometricChecking] = useState(false);
+
+  // Animations
+  const laserAnim = useRef(new Animated.Value(0)).current;
+  const fpPulseAnim = useRef(new Animated.Value(1)).current;
+  const lockPulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     fetchRealLocation();
     checkTodayStatus();
-    startPulseAnimation();
+    loadBiometricsAndFace();
+    startAnimations();
+    faceRecognitionService.initializeFaceRecognitionModel().catch(() => {});
   }, []);
+
+  const loadBiometricsAndFace = async () => {
+    try {
+      const [face, bio] = await Promise.all([
+        attendanceService.getRegisteredFace(),
+        biometricService.checkBiometricAvailability(),
+      ]);
+      setFaceData(face);
+      setBiometricStatus(bio);
+    } catch (e) {
+      console.log("Biometrics status load notice:", e);
+    }
+  };
 
   const checkTodayStatus = async () => {
     try {
@@ -74,16 +129,33 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
     } catch (e) {}
   };
 
-  const startPulseAnimation = () => {
+  const startAnimations = () => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, {
+        Animated.timing(laserAnim, {
+          toValue: 1,
+          duration: 1400,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(laserAnim, {
+          toValue: 0,
+          duration: 1400,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(fpPulseAnim, {
           toValue: 1.15,
           duration: 1000,
           easing: Easing.ease,
           useNativeDriver: true,
         }),
-        Animated.timing(pulseAnim, {
+        Animated.timing(fpPulseAnim, {
           toValue: 1,
           duration: 1000,
           easing: Easing.ease,
@@ -91,18 +163,38 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
         }),
       ])
     ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(lockPulseAnim, {
+          toValue: 1.08,
+          duration: 800,
+          easing: Easing.ease,
+          useNativeDriver: true,
+        }),
+        Animated.timing(lockPulseAnim, {
+          toValue: 1,
+          duration: 800,
+          easing: Easing.ease,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
   };
 
-  const triggerHaptic = () => {
+  const triggerHaptic = (success = true) => {
     try {
       if (Platform.OS === "android") {
-        Vibration.vibrate([0, 35, 25, 35]);
+        Vibration.vibrate(success ? [0, 35, 25, 35] : [0, 60, 40, 60]);
       } else {
-        Vibration.vibrate(35);
+        Vibration.vibrate(success ? 35 : 60);
       }
     } catch {}
   };
 
+  /**
+   * 1. Check Real-Time GPS Location against Office Geofence
+   */
   const fetchRealLocation = async () => {
     setLoadingLoc(true);
     try {
@@ -125,15 +217,11 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
       if (!branch || branch.latitude == null || branch.longitude == null) {
         setGpsData((prev) => ({
           ...prev,
-          branchName: branch?.branchName || "No Branch Assigned",
+          branchName: branch?.branchName || user?.branch || "Main Office",
           isInside: false,
           distanceMeters: 0,
         }));
         setLoadingLoc(false);
-        Alert.alert(
-          "Branch Not Configured",
-          "Your branch location has not been configured by the organization administrator."
-        );
         return;
       }
 
@@ -145,7 +233,7 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
           isInside: false,
         }));
         setLoadingLoc(false);
-        Alert.alert("Permission Required", "GPS Location permission is required for attendance.");
+        Alert.alert("Permission Required", "GPS Location permission is required to verify office perimeter.");
         return;
       }
 
@@ -158,7 +246,7 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
           latitude: branch.latitude as number,
           longitude: branch.longitude as number,
         };
-        const allowedRadius = branch.geofenceRadius || 120;
+        const allowedRadius = branch.geofenceRadius || user?.geofenceRadius || 120;
 
         const geoCheck = validateGeofence(
           { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
@@ -182,80 +270,202 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
     }
   };
 
-  const executeDirectPunch = async () => {
-    if (submitting) return;
+  /**
+   * 2. Face Verification Punch (Requires GPS inside office)
+   */
+  const handleFaceVerifyAndPunch = async () => {
+    if (submitting || faceVerifying) return;
 
     if (!gpsData.isInside) {
       const radius = branchLocation?.geofenceRadius || user?.geofenceRadius || 120;
+      triggerHaptic(false);
       Alert.alert(
-        "Office Geofence Restricted",
-        `You are currently ${gpsData.distanceMeters}m away from '${gpsData.branchName}'.\n\nYou must be within ${radius}m radius to punch attendance.`
+        "Location Locked",
+        `You are outside office premises (${gpsData.distanceMeters}m away from '${gpsData.branchName}').\n\nYou must be within ${radius}m radius to verify face attendance.`
       );
       return;
     }
 
-    setSubmitting(true);
+    if (!faceData.registered || !faceData.faceDescriptor) {
+      Alert.alert(
+        "Face Not Enrolled",
+        "You haven't enrolled your facial biometrics yet. Please enroll your face first to punch with Face ID.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Enroll Face Now", onPress: () => navigation.navigate("FaceRegistration") },
+        ]
+      );
+      return;
+    }
+
+    setFaceVerifying(true);
+    setFaceFeedback("Scanning face with ArcFace AI...");
+
     try {
-      let resultState: TodayPunchState;
-      if (punchType === "OUT") {
-        resultState = await attendanceService.punchOut(undefined, gpsData.latitude, gpsData.longitude);
-      } else {
-        resultState = await attendanceService.punchIn(undefined, gpsData.latitude, gpsData.longitude);
+      let photoUri: string | undefined;
+      let base64Data: string | undefined;
+
+      if (cameraRef.current) {
+        try {
+          const snap = await cameraRef.current.takePictureAsync({
+            quality: 0.5,
+            base64: true,
+            skipProcessing: false,
+            shutterSound: false,
+            exif: false,
+          });
+          photoUri = snap?.uri;
+          base64Data = snap?.base64;
+        } catch (camErr) {}
       }
 
-      triggerHaptic();
+      // Generate probe vector
+      const probe = await faceRecognitionService.generateFaceEmbedding(photoUri, undefined, base64Data);
+
+      // Compare probe against registered baseline
+      const verification = faceRecognitionService.compareFaceEmbeddings(
+        probe.embedding,
+        faceData.faceDescriptor,
+        0.58
+      );
+
+      const scorePercent = Math.round(verification.similarity * 100);
+      setFaceScore(scorePercent);
+
+      if (!verification.matched) {
+        setFaceMatched(false);
+        setFaceFeedback(`Face Match Failed (${scorePercent}%). Align face in good lighting.`);
+        triggerHaptic(false);
+        Alert.alert(
+          "Face Not Recognized",
+          `Match score: ${scorePercent}% (Required: 58%).\nPlease center your face in good light and retry.`
+        );
+        return;
+      }
+
+      setFaceMatched(true);
+      setFaceFeedback(`Identity Verified (${scorePercent}% Match)! Recording attendance...`);
+      setSubmitting(true);
+
+      let resultState: TodayPunchState;
+      if (punchType === "OUT") {
+        resultState = await attendanceService.punchOut(
+          photoUri,
+          gpsData.latitude,
+          gpsData.longitude,
+          "FACE_RECOGNITION",
+          scorePercent
+        );
+      } else {
+        resultState = await attendanceService.punchIn(
+          photoUri,
+          gpsData.latitude,
+          gpsData.longitude,
+          "FACE_RECOGNITION",
+          scorePercent
+        );
+      }
+
+      triggerHaptic(true);
       setPunchResult(resultState);
       setStep("SUCCESS");
     } catch (e: any) {
-      Alert.alert("Punch Error", e?.message || "Could not record attendance. Please try again.");
+      Alert.alert("Face Verification Error", e?.message || "Could not complete face verification.");
+      setFaceFeedback("Verification error. Please retry.");
     } finally {
+      setFaceVerifying(false);
       setSubmitting(false);
     }
   };
 
+  /**
+   * 3. Fingerprint Biometric Punch (Requires GPS inside office)
+   */
+  const handleFingerprintPunch = async () => {
+    if (submitting || biometricChecking) return;
+
+    if (!gpsData.isInside) {
+      const radius = branchLocation?.geofenceRadius || user?.geofenceRadius || 120;
+      triggerHaptic(false);
+      Alert.alert(
+        "Location Locked",
+        `You are outside office premises (${gpsData.distanceMeters}m away from '${gpsData.branchName}').\n\nYou must be within ${radius}m radius to punch biometric attendance.`
+      );
+      return;
+    }
+
+    setBiometricChecking(true);
+    try {
+      const authResult = await biometricService.authenticateBiometric(
+        `Scan fingerprint to record ${punchType === "IN" ? "Check-In" : "Check-Out"}`
+      );
+
+      if (!authResult.success) {
+        if (authResult.error && !authResult.error.includes("cancelled")) {
+          Alert.alert("Biometric Verification Failed", authResult.error);
+        }
+        return;
+      }
+
+      setSubmitting(true);
+      let resultState: TodayPunchState;
+      if (punchType === "OUT") {
+        resultState = await attendanceService.punchOut(
+          undefined,
+          gpsData.latitude,
+          gpsData.longitude,
+          "BIOMETRIC_DEVICE"
+        );
+      } else {
+        resultState = await attendanceService.punchIn(
+          undefined,
+          gpsData.latitude,
+          gpsData.longitude,
+          "BIOMETRIC_DEVICE"
+        );
+      }
+
+      triggerHaptic(true);
+      setPunchResult(resultState);
+      setStep("SUCCESS");
+    } catch (e: any) {
+      Alert.alert("Punch Error", e?.message || "Could not record biometric attendance.");
+    } finally {
+      setBiometricChecking(false);
+      setSubmitting(false);
+    }
+  };
+
+  const translateYLaser = laserAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 190],
+  });
+
+  const allowedRadius = branchLocation?.geofenceRadius || user?.geofenceRadius || 120;
+
   return (
     <SafeAreaView style={styles.container}>
+      {/* Top Navigation Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-        >
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
           <ArrowLeft size={20} color="#0F172A" />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>
-            {step === "LOCATION" ? "Attendance Punch" : "Attendance Verified"}
+            {step === "VERIFY" ? "Daily Attendance Punch" : "Attendance Recorded"}
           </Text>
           <Text style={styles.headerSubtitle}>
-            {step === "LOCATION" ? "GPS Geofence Verification" : "Official Timestamp Recorded"}
+            {step === "VERIFY" ? "GPS Geofence + Biometric Security" : "Official Timestamp Recorded"}
           </Text>
         </View>
         <View style={styles.badgeStep}>
-          <Text style={styles.badgeStepText}>
-            {step === "LOCATION" ? "1/1" : "✓"}
-          </Text>
+          <Text style={styles.badgeStepText}>{step === "VERIFY" ? "2-STEP" : "✓"}</Text>
         </View>
       </View>
 
-      {step === "LOCATION" && (
+      {step === "VERIFY" && (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.radarCard}>
-            <View style={styles.radarOuterRing}>
-              <Animated.View style={[styles.pulseRing, { transform: [{ scale: pulseAnim }] }]} />
-              <View style={styles.radarMidRing}>
-                <View style={styles.radarCore}>
-                  <MapPin size={36} color="#00B050" />
-                </View>
-              </View>
-            </View>
-          </View>
-
-          <Text style={styles.title}>GPS Geofence Attendance</Text>
-          <Text style={styles.subtitle}>
-            Your real-time GPS location is verified against your designated office branch perimeter.
-          </Text>
-
+          {/* Shift Type Switcher (Check-In vs Check-Out) */}
           <View style={styles.typeSelectorRow}>
             <TouchableOpacity
               style={[styles.typeBtn, punchType === "IN" && styles.typeBtnActive]}
@@ -278,114 +488,283 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.locCard}>
-            <View style={styles.locHeader}>
-              <View style={styles.locTitleRow}>
-                <Building2 size={18} color="#00B050" style={{ marginRight: 6 }} />
-                <Text style={styles.locBranchName}>{gpsData.branchName}</Text>
+          {/* ========================================================
+              STEP 1: LOCATION GEOFENCE CHECK (THE GATEKEEPER)
+             ======================================================== */}
+          <View style={[styles.stepCard, gpsData.isInside ? styles.stepCardSuccess : styles.stepCardLocked]}>
+            <View style={styles.stepHeader}>
+              <View style={styles.stepTagRow}>
+                <View style={[styles.stepNumberBadge, gpsData.isInside ? styles.badgeSuccessBg : styles.badgeLockedBg]}>
+                  <Text style={[styles.stepNumberText, gpsData.isInside ? styles.badgeSuccessText : styles.badgeLockedText]}>
+                    STEP 1
+                  </Text>
+                </View>
+                <Text style={styles.stepHeaderTitle}>Office Location Verification</Text>
               </View>
-              <View
-                style={[
-                  styles.statusPill,
-                  gpsData.isInside ? styles.statusPillInside : styles.statusPillOutside,
-                ]}
-              >
-                <ShieldCheck
-                  size={14}
-                  color={gpsData.isInside ? "#00B050" : "#DC2626"}
-                  style={{ marginRight: 4 }}
-                />
-                <Text
-                  style={[
-                    styles.statusPillText,
-                    gpsData.isInside ? styles.textInside : styles.textOutside,
-                  ]}
-                >
-                  {gpsData.isInside ? "Inside Geofence" : "Outside Geofence"}
+
+              <View style={[styles.statusPill, gpsData.isInside ? styles.statusPillInside : styles.statusPillOutside]}>
+                {gpsData.isInside ? (
+                  <ShieldCheck size={13} color="#00B050" style={{ marginRight: 4 }} />
+                ) : (
+                  <ShieldAlert size={13} color="#DC2626" style={{ marginRight: 4 }} />
+                )}
+                <Text style={[styles.statusPillText, gpsData.isInside ? styles.textInside : styles.textOutside]}>
+                  {gpsData.isInside ? "Inside Office" : "Outside Office"}
                 </Text>
               </View>
             </View>
 
+            {/* Branch Details */}
+            <View style={styles.locBranchRow}>
+              <Building2 size={16} color={gpsData.isInside ? "#00B050" : "#64748B"} style={{ marginRight: 6 }} />
+              <Text style={styles.locBranchText}>{gpsData.branchName}</Text>
+            </View>
+
+            {/* Location Metrics */}
             <View style={styles.locMetrics}>
               <View style={styles.metricItem}>
                 <Text style={styles.metricLabel}>Distance to Office</Text>
-                <Text style={styles.metricVal}>{gpsData.distanceMeters} Meters</Text>
+                <Text style={[styles.metricVal, !gpsData.isInside && { color: "#DC2626" }]}>
+                  {loadingLoc ? "Checking..." : `${gpsData.distanceMeters} Meters`}
+                </Text>
               </View>
               <View style={styles.metricDivider} />
               <View style={styles.metricItem}>
                 <Text style={styles.metricLabel}>Allowed Radius</Text>
-                <Text style={styles.metricVal}>
-                  {branchLocation?.geofenceRadius || 120}m (±{gpsData.accuracy ? Math.round(gpsData.accuracy) : 8}m)
-                </Text>
+                <Text style={styles.metricVal}>{allowedRadius}m</Text>
               </View>
             </View>
 
-            {branchLocation?.latitude != null && gpsData.latitude !== 0 && (
-              <View style={styles.coordsRow}>
-                <Text style={styles.coordText}>
-                  Office: {branchLocation.latitude.toFixed(4)}, {branchLocation.longitude?.toFixed(4)}
+            {/* Location Banner (Unlocked vs Locked) */}
+            {loadingLoc ? (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator size="small" color="#00B050" />
+                <Text style={styles.loadingRowText}>Verifying GPS satellite coordinates...</Text>
+              </View>
+            ) : gpsData.isInside ? (
+              <View style={styles.locUnlockedBanner}>
+                <Unlock size={16} color="#00B050" style={{ marginRight: 6 }} />
+                <Text style={styles.locUnlockedText}>
+                  Location Verified! You are inside the office radius. Biometrics unlocked below.
                 </Text>
-                <Text style={styles.coordText}>
-                  GPS: {gpsData.latitude.toFixed(4)}, {gpsData.longitude.toFixed(4)}
+              </View>
+            ) : (
+              <View style={styles.locLockedBanner}>
+                <Lock size={16} color="#DC2626" style={{ marginRight: 6 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.locLockedTitle}>Location Restricted ({gpsData.distanceMeters}m away)</Text>
+                  <Text style={styles.locLockedText}>
+                    You must be within {allowedRadius}m of {gpsData.branchName} to unlock Face ID or Fingerprint attendance.
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            <TouchableOpacity style={styles.refreshBtn} onPress={fetchRealLocation} activeOpacity={0.7}>
+              <RefreshCw size={14} color="#64748B" />
+              <Text style={styles.refreshBtnText}>Refresh GPS Coordinates</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ========================================================
+              STEP 2: BIOMETRIC VERIFICATION (FACE ID OR FINGERPRINT)
+             ======================================================== */}
+          <View style={[styles.stepCard, !gpsData.isInside && styles.stepCardDisabled]}>
+            <View style={styles.stepHeader}>
+              <View style={styles.stepTagRow}>
+                <View style={[styles.stepNumberBadge, gpsData.isInside ? styles.badgeSuccessBg : styles.badgeDisabledBg]}>
+                  <Text style={[styles.stepNumberText, gpsData.isInside ? styles.badgeSuccessText : styles.badgeDisabledText]}>
+                    STEP 2
+                  </Text>
+                </View>
+                <Text style={styles.stepHeaderTitle}>Biometric Verification</Text>
+              </View>
+            </View>
+
+            {/* Biometric Method Selector (Face ID vs Fingerprint) */}
+            <View style={styles.biometricTabsRow}>
+              <TouchableOpacity
+                style={[styles.bioTab, activeBiometric === "FACE" && styles.bioTabActive]}
+                onPress={() => setActiveBiometric("FACE")}
+                activeOpacity={0.8}
+              >
+                <CameraIcon size={16} color={activeBiometric === "FACE" ? "#00B050" : "#64748B"} />
+                <Text style={[styles.bioTabText, activeBiometric === "FACE" && styles.bioTabTextActive]}>
+                  Face ID AI
                 </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.bioTab, activeBiometric === "FINGERPRINT" && styles.bioTabActive]}
+                onPress={() => setActiveBiometric("FINGERPRINT")}
+                activeOpacity={0.8}
+              >
+                <Fingerprint size={16} color={activeBiometric === "FINGERPRINT" ? "#00B050" : "#64748B"} />
+                <Text style={[styles.bioTabText, activeBiometric === "FINGERPRINT" && styles.bioTabTextActive]}>
+                  Fingerprint
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* If OUTSIDE Geofence: Show clear lock overlay */}
+            {!gpsData.isInside ? (
+              <View style={styles.lockedBiometricBox}>
+                <Animated.View style={[styles.lockedIconCircle, { transform: [{ scale: lockPulseAnim }] }]}>
+                  <Lock size={32} color="#DC2626" />
+                </Animated.View>
+                <Text style={styles.lockedTitle}>Biometric Scanner Locked</Text>
+                <Text style={styles.lockedDesc}>
+                  Enter designated office branch area ({gpsData.branchName}) to enable Face ID or Fingerprint attendance punch.
+                </Text>
+              </View>
+            ) : (
+              /* If INSIDE Geofence: Unlocked Biometric Views */
+              <View style={{ width: "100%", marginTop: 8 }}>
+                {activeBiometric === "FACE" ? (
+                  /* FACE ID SCANNER */
+                  !faceData.registered ? (
+                    <View style={styles.faceNotEnrolledCard}>
+                      <UserCheck size={36} color="#D97706" style={{ marginBottom: 8 }} />
+                      <Text style={styles.faceEnrollTitle}>Face Biometrics Not Enrolled</Text>
+                      <Text style={styles.faceEnrollDesc}>
+                        Please enroll your face profile once to use instant touchless Face AI attendance.
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.enrollNowBtn}
+                        onPress={() => navigation.navigate("FaceRegistration")}
+                        activeOpacity={0.85}
+                      >
+                        <Sparkles size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                        <Text style={styles.enrollNowBtnText}>Enroll Face Profile Now</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={styles.cameraBoxContainer}>
+                      <View style={styles.cameraFrame}>
+                        <FaceCamera
+                          cameraRef={cameraRef}
+                          facing={facing}
+                          permissionGranted={!!permission?.granted}
+                          onRequestPermission={requestPermission}
+                        >
+                          <View style={styles.camTopActions}>
+                            <View style={styles.aiTag}>
+                              <Sparkles size={12} color="#00B050" />
+                              <Text style={styles.aiTagText}>ArcFace AI Live</Text>
+                            </View>
+                            <TouchableOpacity
+                              style={styles.camFlipBtn}
+                              onPress={() => setFacing((prev) => (prev === "front" ? "back" : "front"))}
+                              activeOpacity={0.7}
+                            >
+                              <FlipHorizontal size={16} color="#FFFFFF" />
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Oval Guide with Laser */}
+                          <View style={styles.ovalGuideWrapper} pointerEvents="none">
+                            <View
+                              style={[
+                                styles.ovalGuide,
+                                faceMatched === true && styles.ovalGuideSuccess,
+                                faceMatched === false && styles.ovalGuideError,
+                              ]}
+                            >
+                              <Animated.View
+                                style={[
+                                  styles.laserLine,
+                                  { transform: [{ translateY: translateYLaser }] },
+                                ]}
+                              />
+                            </View>
+                          </View>
+
+                          <View style={styles.camBottomFeedback}>
+                            <Text style={styles.feedbackText}>{faceFeedback}</Text>
+                          </View>
+                        </FaceCamera>
+                      </View>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.primaryPunchBtn,
+                          (faceVerifying || submitting) && styles.primaryPunchBtnDisabled,
+                        ]}
+                        onPress={handleFaceVerifyAndPunch}
+                        disabled={faceVerifying || submitting}
+                        activeOpacity={0.85}
+                      >
+                        {faceVerifying || submitting ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <>
+                            <CameraIcon size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                            <Text style={styles.primaryPunchBtnText}>
+                              {punchType === "IN" ? "Verify Face & Punch In" : "Verify Face & Punch Out"}
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  )
+                ) : (
+                  /* FINGERPRINT SCANNER */
+                  <View style={styles.fpContainer}>
+                    <View style={styles.fpRadarCard}>
+                      <Animated.View
+                        style={[
+                          styles.fpPulseRing,
+                          { transform: [{ scale: fpPulseAnim }] },
+                        ]}
+                      />
+                      <TouchableOpacity
+                        style={styles.fpTouchTarget}
+                        onPress={handleFingerprintPunch}
+                        disabled={biometricChecking || submitting}
+                        activeOpacity={0.7}
+                      >
+                        <Fingerprint size={52} color="#00B050" />
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={styles.fpTitle}>
+                      {biometricStatus?.typeLabel || "Touch Fingerprint Sensor"}
+                    </Text>
+                    <Text style={styles.fpSubtitle}>
+                      Tap the fingerprint sensor on your phone or tap the scanner button below to punch attendance.
+                    </Text>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.primaryPunchBtn,
+                        (biometricChecking || submitting) && styles.primaryPunchBtnDisabled,
+                      ]}
+                      onPress={handleFingerprintPunch}
+                      disabled={biometricChecking || submitting}
+                      activeOpacity={0.85}
+                    >
+                      {biometricChecking || submitting ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <Fingerprint size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                          <Text style={styles.primaryPunchBtnText}>
+                            {punchType === "IN" ? "Scan Fingerprint to Punch In" : "Scan Fingerprint to Punch Out"}
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             )}
           </View>
-
-          {loadingLoc ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator color="#00B050" size="small" />
-              <Text style={styles.loadingText}>Syncing satellite GPS coordinates...</Text>
-            </View>
-          ) : (
-            <View style={styles.actionBlock}>
-              {!gpsData.isInside && (
-                <View style={styles.outOfRangeNotice}>
-                  <AlertTriangle size={16} color="#DC2626" style={{ marginRight: 6 }} />
-                  <Text style={styles.outOfRangeText}>
-                    Attendance Locked: You are outside your designated office geofence ({gpsData.distanceMeters}m away).
-                  </Text>
-                </View>
-              )}
-
-              <TouchableOpacity
-                style={styles.refreshLocBtn}
-                onPress={fetchRealLocation}
-                activeOpacity={0.7}
-              >
-                <RefreshCw size={16} color="#64748B" />
-                <Text style={styles.refreshLocText}>Refresh GPS Location</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.primaryBtn,
-                  !gpsData.isInside && styles.primaryBtnDisabled,
-                ]}
-                onPress={executeDirectPunch}
-                disabled={submitting || !gpsData.isInside}
-                activeOpacity={0.85}
-              >
-                {submitting ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <CheckCircle2 size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                    <Text style={styles.primaryBtnText}>
-                      {gpsData.isInside
-                        ? punchType === "IN"
-                          ? "Confirm Punch-In"
-                          : "Confirm Punch-Out"
-                        : "Location Restricted (Out of Range)"}
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
         </ScrollView>
       )}
 
+      {/* ========================================================
+          STEP 3: SUCCESS CONFIRMATION RECEIPT
+         ======================================================== */}
       {step === "SUCCESS" && (
         <ScrollView
           style={{ flex: 1 }}
@@ -400,7 +779,7 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
             {punchType === "IN" ? "Punch-In Successful!" : "Punch-Out Successful!"}
           </Text>
           <Text style={styles.subtitle}>
-            GPS Geofenced attendance has been recorded successfully in the system.
+            GPS Office perimeter & Biometric identity verified successfully.
           </Text>
 
           <View style={styles.receiptCard}>
@@ -424,9 +803,21 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
 
             <View style={styles.receiptRow}>
               <Text style={styles.receiptLabel}>Verification Method</Text>
-              <Text style={[styles.receiptVal, { color: "#00B050" }]}>
-                GPS Geofence Verified
-              </Text>
+              <View style={styles.receiptMethodBadge}>
+                {punchResult?.verificationMethod === "FACE_RECOGNITION" ? (
+                  <>
+                    <CameraIcon size={14} color="#00B050" style={{ marginRight: 4 }} />
+                    <Text style={styles.receiptMethodText}>
+                      Face AI Verified ({punchResult?.faceMatchScore || faceScore || 98}%)
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Fingerprint size={14} color="#00B050" style={{ marginRight: 4 }} />
+                    <Text style={styles.receiptMethodText}>Fingerprint Biometric Verified</Text>
+                  </>
+                )}
+              </View>
             </View>
 
             <View style={styles.receiptDivider} />
@@ -463,7 +854,6 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
             )}
           </View>
 
-
           <TouchableOpacity
             style={styles.doneBtn}
             onPress={() => {
@@ -479,7 +869,6 @@ export default function CheckInScreen({ navigation }: { navigation: any }) {
           </TouchableOpacity>
         </ScrollView>
       )}
-
     </SafeAreaView>
   );
 }
@@ -493,7 +882,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     paddingVertical: 14,
     backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
@@ -534,66 +923,8 @@ const styles = StyleSheet.create({
     color: "#00B050",
   },
   content: {
-    padding: 20,
+    padding: 16,
     alignItems: "center",
-  },
-  radarCard: {
-    alignItems: "center",
-    justifyContent: "center",
-    marginVertical: 18,
-  },
-  radarOuterRing: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    backgroundColor: "rgba(0, 176, 80, 0.06)",
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-  },
-  pulseRing: {
-    position: "absolute",
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    borderWidth: 1.5,
-    borderColor: "rgba(0, 176, 80, 0.3)",
-  },
-  radarMidRing: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: "rgba(0, 176, 80, 0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radarCore: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 3,
-    shadowColor: "#00B050",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#0F172A",
-    marginBottom: 6,
-    textAlign: "center",
-  },
-  subtitle: {
-    fontSize: 13,
-    color: "#64748B",
-    textAlign: "center",
-    lineHeight: 19,
-    paddingHorizontal: 12,
-    marginBottom: 18,
   },
   typeSelectorRow: {
     flexDirection: "row",
@@ -601,11 +932,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 4,
     width: "100%",
-    marginBottom: 16,
+    marginBottom: 14,
   },
   typeBtn: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 9,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 10,
@@ -619,43 +950,79 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
   },
   typeBtnText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
     color: "#64748B",
   },
   typeBtnTextActive: {
     color: "#00B050",
   },
-  locCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 16,
+  stepCard: {
     width: "100%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    marginBottom: 18,
+    marginBottom: 14,
   },
-  locHeader: {
+  stepCardSuccess: {
+    borderColor: "#BBF7D0",
+  },
+  stepCardLocked: {
+    borderColor: "#FECACA",
+  },
+  stepCardDisabled: {
+    opacity: 0.9,
+  },
+  stepHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 14,
+    marginBottom: 10,
   },
-  locTitleRow: {
+  stepTagRow: {
     flexDirection: "row",
     alignItems: "center",
-    flex: 1,
+    gap: 8,
   },
-  locBranchName: {
-    fontSize: 15,
+  stepNumberBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  badgeSuccessBg: {
+    backgroundColor: "#DCFCE7",
+  },
+  badgeLockedBg: {
+    backgroundColor: "#FEE2E2",
+  },
+  badgeDisabledBg: {
+    backgroundColor: "#F1F5F9",
+  },
+  stepNumberText: {
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  badgeSuccessText: {
+    color: "#00B050",
+  },
+  badgeLockedText: {
+    color: "#DC2626",
+  },
+  badgeDisabledText: {
+    color: "#94A3B8",
+  },
+  stepHeaderTitle: {
+    fontSize: 14,
     fontWeight: "800",
     color: "#0F172A",
   },
   statusPill: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 20,
   },
   statusPillInside: {
@@ -665,7 +1032,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FEE2E2",
   },
   statusPillText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "800",
   },
   textInside: {
@@ -674,11 +1041,22 @@ const styles = StyleSheet.create({
   textOutside: {
     color: "#DC2626",
   },
+  locBranchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  locBranchText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
   locMetrics: {
     flexDirection: "row",
     backgroundColor: "#F8FAFC",
     borderRadius: 12,
-    padding: 12,
+    padding: 10,
+    marginBottom: 10,
   },
   metricItem: {
     flex: 1,
@@ -689,84 +1067,317 @@ const styles = StyleSheet.create({
     backgroundColor: "#E2E8F0",
   },
   metricLabel: {
-    fontSize: 11,
+    fontSize: 10,
     color: "#64748B",
-    marginBottom: 4,
+    marginBottom: 2,
   },
   metricVal: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "800",
     color: "#0F172A",
   },
-  coordsRow: {
-    marginTop: 10,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: "#F1F5F9",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  coordText: {
-    fontSize: 10,
-    color: "#94A3B8",
-  },
-  loadingContainer: {
-    padding: 24,
-    alignItems: "center",
-  },
-  loadingText: {
-    fontSize: 13,
-    color: "#64748B",
-    marginTop: 8,
-  },
-  actionBlock: {
-    width: "100%",
-  },
-  outOfRangeNotice: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FEF2F2",
-    borderRadius: 10,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-    marginBottom: 12,
-  },
-  outOfRangeText: {
-    fontSize: 12,
-    color: "#DC2626",
-    flex: 1,
-    lineHeight: 17,
-  },
-  refreshLocBtn: {
+  loadingRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 10,
-    marginBottom: 10,
+    paddingVertical: 8,
+    gap: 8,
   },
-  refreshLocText: {
-    fontSize: 13,
+  loadingRowText: {
+    fontSize: 12,
+    color: "#64748B",
+  },
+  locUnlockedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0FDF4",
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+    marginBottom: 8,
+  },
+  locUnlockedText: {
+    fontSize: 11,
+    color: "#166534",
+    fontWeight: "600",
+    flex: 1,
+    lineHeight: 16,
+  },
+  locLockedBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#FEF2F2",
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    marginBottom: 8,
+  },
+  locLockedTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#DC2626",
+    marginBottom: 2,
+  },
+  locLockedText: {
+    fontSize: 11,
+    color: "#991B1B",
+    lineHeight: 15,
+  },
+  refreshBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6,
+    gap: 6,
+  },
+  refreshBtnText: {
+    fontSize: 12,
     fontWeight: "700",
     color: "#64748B",
-    marginLeft: 6,
   },
-  primaryBtn: {
+  biometricTabsRow: {
+    flexDirection: "row",
+    backgroundColor: "#F1F5F9",
+    borderRadius: 12,
+    padding: 3,
+    width: "100%",
+    marginBottom: 10,
+  },
+  bioTab: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    borderRadius: 9,
+    gap: 6,
+  },
+  bioTabActive: {
+    backgroundColor: "#FFFFFF",
+    elevation: 2,
+  },
+  bioTabText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#64748B",
+  },
+  bioTabTextActive: {
+    color: "#00B050",
+  },
+  lockedBiometricBox: {
+    alignItems: "center",
+    paddingVertical: 20,
+    paddingHorizontal: 12,
+  },
+  lockedIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#FEE2E2",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  lockedTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#DC2626",
+    marginBottom: 4,
+  },
+  lockedDesc: {
+    fontSize: 12,
+    color: "#64748B",
+    textAlign: "center",
+    lineHeight: 17,
+  },
+  faceNotEnrolledCard: {
+    alignItems: "center",
+    paddingVertical: 18,
+  },
+  faceEnrollTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#0F172A",
+    marginBottom: 4,
+  },
+  faceEnrollDesc: {
+    fontSize: 12,
+    color: "#64748B",
+    textAlign: "center",
+    lineHeight: 17,
+    marginBottom: 14,
+    paddingHorizontal: 16,
+  },
+  enrollNowBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#00B050",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  enrollNowBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  cameraBoxContainer: {
+    width: "100%",
+    alignItems: "center",
+  },
+  cameraFrame: {
+    width: "100%",
+    height: 280,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#000000",
+  },
+  camTopActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingTop: 10,
+  },
+  aiTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  aiTagText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  camFlipBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ovalGuideWrapper: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ovalGuide: {
+    width: 160,
+    height: 195,
+    borderRadius: 80,
+    borderWidth: 2.5,
+    borderColor: "rgba(0, 176, 80, 0.8)",
+    borderStyle: "dashed",
+    overflow: "hidden",
+    position: "relative",
+  },
+  ovalGuideSuccess: {
+    borderColor: "#00B050",
+    borderStyle: "solid",
+  },
+  ovalGuideError: {
+    borderColor: "#DC2626",
+  },
+  laserLine: {
+    width: "100%",
+    height: 2,
+    backgroundColor: "#00B050",
+    shadowColor: "#00B050",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+  },
+  camBottomFeedback: {
+    backgroundColor: "rgba(15, 23, 42, 0.85)",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    alignSelf: "center",
+    marginBottom: 10,
+  },
+  feedbackText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  primaryPunchBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#00B050",
     borderRadius: 14,
-    paddingVertical: 15,
-    elevation: 2,
+    paddingVertical: 14,
+    width: "100%",
+    marginTop: 12,
+    elevation: 3,
   },
-  primaryBtnDisabled: {
+  primaryPunchBtnDisabled: {
     backgroundColor: "#94A3B8",
   },
-  primaryBtnText: {
-    fontSize: 15,
+  primaryPunchBtnText: {
+    fontSize: 14,
     fontWeight: "800",
     color: "#FFFFFF",
+  },
+  fpContainer: {
+    width: "100%",
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  fpRadarCard: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "rgba(0, 176, 80, 0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+    marginVertical: 10,
+  },
+  fpPulseRing: {
+    position: "absolute",
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 2,
+    borderColor: "rgba(0, 176, 80, 0.35)",
+  },
+  fpTouchTarget: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
+    shadowColor: "#00B050",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+  },
+  fpTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#0F172A",
+    marginTop: 6,
+    textAlign: "center",
+  },
+  fpSubtitle: {
+    fontSize: 12,
+    color: "#64748B",
+    textAlign: "center",
+    lineHeight: 17,
+    marginTop: 4,
+    marginBottom: 8,
+    paddingHorizontal: 12,
   },
   successContent: {
     padding: 24,
@@ -775,49 +1386,70 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   successIconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     backgroundColor: "#DCFCE7",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
+    marginBottom: 14,
   },
   successTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "900",
     color: "#0F172A",
-    marginBottom: 6,
+    marginBottom: 4,
     textAlign: "center",
+  },
+  subtitle: {
+    fontSize: 12,
+    color: "#64748B",
+    textAlign: "center",
+    lineHeight: 18,
+    paddingHorizontal: 16,
   },
   receiptCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
-    padding: 18,
+    padding: 16,
     width: "100%",
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    marginVertical: 20,
+    marginVertical: 18,
   },
   receiptRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 6,
+    paddingVertical: 7,
   },
   receiptDivider: {
     height: 1,
     backgroundColor: "#F1F5F9",
-    marginVertical: 6,
+    marginVertical: 2,
   },
   receiptLabel: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#64748B",
+    fontWeight: "600",
   },
   receiptVal: {
     fontSize: 13,
-    fontWeight: "700",
     color: "#0F172A",
+    fontWeight: "700",
+  },
+  receiptMethodBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  receiptMethodText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#00B050",
   },
   receiptBadge: {
     paddingHorizontal: 8,
@@ -842,14 +1474,15 @@ const styles = StyleSheet.create({
   },
   doneBtn: {
     width: "100%",
-    backgroundColor: "#0F172A",
+    backgroundColor: "#00B050",
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: "center",
+    justifyContent: "center",
   },
   doneBtnText: {
-    color: "#FFFFFF",
     fontSize: 14,
     fontWeight: "800",
+    color: "#FFFFFF",
   },
 });

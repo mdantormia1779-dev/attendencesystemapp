@@ -729,7 +729,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   matchSuccessOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(15,23,42,0.50)",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -25,16 +25,27 @@ import {
   QrCode,
   MapPin,
   Flame,
+  Fingerprint,
+  CheckSquare,
+  Bell,
+  X,
 } from "lucide-react-native";
 import { useAuth } from "../../context/AuthContext";
 import { attendanceService, OFFICE_TIMINGS, TodayPunchState, RegisteredFaceData } from "../../services/attendanceService";
 import { branchApi, BranchLocationData } from "../../api/branch";
+import { tasksApi } from "../../api/tasks";
+import { notificationsApi, NotificationItem } from "../../api/notifications";
+import { playNotificationSound } from "../../services/notificationSoundService";
 
 export default function HomeScreen({ navigation }: { navigation: any }) {
   const { user } = useAuth();
   const [todayPunch, setTodayPunch] = useState<TodayPunchState | null>(null);
   const [faceData, setFaceData] = useState<RegisteredFaceData>({ registered: false });
   const [branchData, setBranchData] = useState<BranchLocationData | null>(null);
+  const [pendingTasksCount, setPendingTasksCount] = useState<number>(0);
+  const [unreadNotifsCount, setUnreadNotifsCount] = useState<number>(0);
+  const [incomingAlert, setIncomingAlert] = useState<NotificationItem | null>(null);
+  const lastNotifIdRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState<string>(
@@ -57,15 +68,38 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 
   const fetchData = async () => {
     try {
-      const [punch, face, branchRes] = await Promise.all([
+      const [punch, face, branchRes, tasksRes, notifsRes] = await Promise.all([
         attendanceService.getTodayPunch(),
         attendanceService.getRegisteredFace(),
         branchApi.getBranchLocation().catch(() => null),
+        tasksApi.getTasks().catch(() => null),
+        notificationsApi.getNotifications().catch(() => null),
       ]);
       setTodayPunch(punch);
       setFaceData(face);
       if (branchRes?.success && branchRes?.data) {
         setBranchData(branchRes.data);
+      }
+      if (tasksRes?.success && Array.isArray(tasksRes?.data)) {
+        const active = tasksRes.data.filter((t: any) => t.status === "PENDING" || t.status === "IN_PROGRESS").length;
+        setPendingTasksCount(active);
+      }
+      if (notifsRes?.data?.notifications && Array.isArray(notifsRes.data.notifications)) {
+        const notifs = notifsRes.data.notifications;
+        const unread = notifs.filter((n: any) => !n.isRead).length;
+        setUnreadNotifsCount(unread);
+
+        if (notifs.length > 0) {
+          const latest = notifs[0];
+          if (lastNotifIdRef.current && lastNotifIdRef.current !== latest.id && !latest.isRead) {
+            playNotificationSound();
+            setIncomingAlert(latest);
+            setTimeout(() => setIncomingAlert(null), 6000);
+          }
+          lastNotifIdRef.current = latest.id;
+        }
+      } else if (notifsRes?.data?.unreadCount !== undefined) {
+        setUnreadNotifsCount(notifsRes.data.unreadCount);
       }
     } catch (e) {
       console.log("Home data fetch:", e);
@@ -82,6 +116,30 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     });
     return unsubscribe;
   }, [navigation]);
+
+  // Live polling for instant admin notices & task sound chime
+  useEffect(() => {
+    const pollTimer = setInterval(async () => {
+      try {
+        const res = await notificationsApi.getNotifications().catch(() => null);
+        const list = res?.data?.notifications;
+        if (Array.isArray(list) && list.length > 0) {
+          const unread = list.filter((n: any) => !n.isRead).length;
+          setUnreadNotifsCount(unread);
+
+          const latest = list[0];
+          if (lastNotifIdRef.current && lastNotifIdRef.current !== latest.id && !latest.isRead) {
+            playNotificationSound();
+            setIncomingAlert(latest);
+            setTimeout(() => setIncomingAlert(null), 6000);
+          }
+          lastNotifIdRef.current = latest.id;
+        }
+      } catch {}
+    }, 12000);
+
+    return () => clearInterval(pollTimer);
+  }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -102,6 +160,48 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Real-time Notification Banner with Sound Chime */}
+      {incomingAlert && (
+        <TouchableOpacity
+          style={styles.floatingAlertBanner}
+          onPress={() => {
+            setIncomingAlert(null);
+            navigation.navigate("Notifications");
+          }}
+          activeOpacity={0.9}
+        >
+          <View
+            style={[
+              styles.alertIconBox,
+              incomingAlert.title.toLowerCase().includes("task")
+                ? { backgroundColor: "#F0FDF4" }
+                : { backgroundColor: "#EFF6FF" },
+            ]}
+          >
+            {incomingAlert.title.toLowerCase().includes("task") ? (
+              <CheckSquare size={18} color="#00B050" />
+            ) : (
+              <Bell size={18} color="#2563EB" />
+            )}
+          </View>
+          <View style={styles.alertTextBox}>
+            <Text style={styles.alertTitle} numberOfLines={1}>
+              {incomingAlert.title}
+            </Text>
+            <Text style={styles.alertMsg} numberOfLines={1}>
+              {incomingAlert.message}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setIncomingAlert(null)}
+            style={styles.alertCloseBtn}
+            activeOpacity={0.7}
+          >
+            <X size={16} color="#94A3B8" />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      )}
+
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={
@@ -131,20 +231,37 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           </View>
 
 
-          <TouchableOpacity
-            style={styles.profileBadge}
-            onPress={() => navigation.navigate("Profile")}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.profileInitials}>
-              {(user?.fullName || "EM").substring(0, 2).toUpperCase()}
-            </Text>
-            {faceData.registered && (
-              <View style={styles.faceStatusDot}>
-                <Sparkles size={8} color="#FFFFFF" />
-              </View>
-            )}
-          </TouchableOpacity>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <TouchableOpacity
+              style={styles.bellBtn}
+              onPress={() => navigation.navigate("Notifications")}
+              activeOpacity={0.8}
+            >
+              <Bell size={20} color="#0F172A" />
+              {unreadNotifsCount > 0 && (
+                <View style={styles.bellBadge}>
+                  <Text style={styles.bellBadgeText}>
+                    {unreadNotifsCount > 9 ? "9+" : unreadNotifsCount}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.profileBadge}
+              onPress={() => navigation.navigate("Profile")}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.profileInitials}>
+                {(user?.fullName || "EM").substring(0, 2).toUpperCase()}
+              </Text>
+              {faceData.registered && (
+                <View style={styles.faceStatusDot}>
+                  <Sparkles size={8} color="#FFFFFF" />
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Office Shift Timing Banner */}
@@ -229,6 +346,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
           </View>
 
           {/* Action Button */}
+          {/* Multi-Method Punch Action Buttons */}
           <TouchableOpacity
             style={[
               styles.punchBtn,
@@ -238,22 +356,95 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
                 ? [styles.btnCheckin, { backgroundColor: "#0F172A" }]
                 : styles.btnCheckin,
             ]}
-            onPress={() => navigation.navigate("CheckIn")}
+            onPress={() => navigation.navigate("CheckIn", { mode: faceData.registered ? "FACE" : "FINGERPRINT" })}
             activeOpacity={0.85}
           >
-            <MapPin size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+            {faceData.registered ? (
+              <Camera size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+            ) : (
+              <Fingerprint size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+            )}
             <Text style={styles.punchBtnText}>
               {isCheckedIn && !isCheckedOut
                 ? "Punch Check-Out"
                 : isCheckedOut
                 ? "Shift Completed · View Status"
-                : "GPS Geofence Check-In"}
+                : faceData.registered
+                ? "Face ID / Biometric Check-In"
+                : "Fingerprint / GPS Check-In"}
             </Text>
           </TouchableOpacity>
 
+          {/* Quick Biometric Selectors Row */}
+          <View style={styles.quickMethodsRow}>
+            <TouchableOpacity
+              style={styles.quickMethodBtn}
+              onPress={() => navigation.navigate("CheckIn", { mode: "FACE" })}
+              activeOpacity={0.7}
+            >
+              <Camera size={16} color="#00B050" />
+              <Text style={styles.quickMethodText}>Face AI</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickMethodBtn}
+              onPress={() => navigation.navigate("CheckIn", { mode: "FINGERPRINT" })}
+              activeOpacity={0.7}
+            >
+              <Fingerprint size={16} color="#00B050" />
+              <Text style={styles.quickMethodText}>Fingerprint</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.quickMethodBtn}
+              onPress={() => navigation.navigate("CheckIn")}
+              activeOpacity={0.7}
+            >
+              <MapPin size={16} color="#00B050" />
+              <Text style={styles.quickMethodText}>Office GPS</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Digital ID Card & Biometric Status Card */}
+        {/* Biometric Face Status / Quick Setup Card */}
+        {!faceData.registered ? (
+          <TouchableOpacity
+            style={styles.faceSetupBanner}
+            onPress={() => navigation.navigate("FaceRegistration")}
+            activeOpacity={0.85}
+          >
+            <View style={styles.faceSetupIconBox}>
+              <Sparkles size={20} color="#D97706" />
+            </View>
+            <View style={{ flex: 1, marginHorizontal: 10 }}>
+              <Text style={styles.faceSetupTitle}>Enroll Face Biometrics</Text>
+              <Text style={styles.faceSetupSub}>
+                Setup 3D neural face profile for 1-second touchless check-in
+              </Text>
+            </View>
+            <View style={styles.faceSetupBtnPill}>
+              <Text style={styles.faceSetupBtnPillText}>Setup</Text>
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.faceActiveBanner}>
+            <View style={styles.faceActiveIconBox}>
+              <ShieldCheck size={18} color="#00B050" />
+            </View>
+            <View style={{ flex: 1, marginHorizontal: 8 }}>
+              <Text style={styles.faceActiveTitle}>Face Biometrics Active</Text>
+              <Text style={styles.faceActiveSub}>ArcFace 128D neural vector registered & ready</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => navigation.navigate("FaceRegistration")}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.faceReEnrollText}>Update</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Digital ID Card */}
         <View style={styles.idQuickCard}>
           <View style={styles.idQuickLeft}>
             <View style={styles.idIconBox}>
@@ -305,6 +496,50 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         {/* Quick Menu Section */}
         <Text style={styles.sectionTitle}>Employee Services</Text>
         <View style={styles.menuList}>
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => navigation.navigate("Notifications")}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconBox, { backgroundColor: "#EFF6FF" }]}>
+              <Bell size={20} color="#2563EB" />
+            </View>
+            <View style={styles.menuTextCol}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={styles.menuTitle}>Announcements & Notices</Text>
+                {unreadNotifsCount > 0 && (
+                  <View style={[styles.taskBadge, { backgroundColor: "#EFF6FF", borderColor: "#BFDBFE" }]}>
+                    <Text style={[styles.taskBadgeText, { color: "#2563EB" }]}>{unreadNotifsCount} New</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.menuSubtitle}>Organization updates, alerts & messages</Text>
+            </View>
+            <ChevronRight size={18} color="#94A3B8" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => navigation.navigate("Tasks")}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconBox, { backgroundColor: "#F0FDF4" }]}>
+              <CheckSquare size={20} color="#00B050" />
+            </View>
+            <View style={styles.menuTextCol}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={styles.menuTitle}>My Tasks & Deliverables</Text>
+                {pendingTasksCount > 0 && (
+                  <View style={styles.taskBadge}>
+                    <Text style={styles.taskBadgeText}>{pendingTasksCount} Active</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.menuSubtitle}>Assigned tasks, deadlines & status updates</Text>
+            </View>
+            <ChevronRight size={18} color="#94A3B8" />
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => navigation.navigate("AttendanceTab")}
@@ -380,6 +615,49 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 36,
   },
+  floatingAlertBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: "#00B050",
+    shadowColor: "#00B050",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
+    zIndex: 999,
+  },
+  alertIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  alertTextBox: {
+    flex: 1,
+  },
+  alertTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  alertMsg: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 1,
+  },
+  alertCloseBtn: {
+    padding: 6,
+    marginLeft: 6,
+  },
   topHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -421,6 +699,41 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     color: "#00B050",
+  },
+  bellBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+    position: "relative",
+  },
+  bellBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#EF4444",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+  },
+  bellBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "800",
   },
   profileBadge: {
     width: 48,
@@ -606,6 +919,102 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
   },
+  quickMethodsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+  },
+  quickMethodBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    paddingVertical: 8,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  quickMethodText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  faceSetupBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFBEB",
+    borderRadius: 18,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    marginBottom: 16,
+  },
+  faceSetupIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  faceSetupTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#92400E",
+  },
+  faceSetupSub: {
+    fontSize: 11,
+    color: "#B45309",
+    marginTop: 1,
+  },
+  faceSetupBtnPill: {
+    backgroundColor: "#D97706",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  faceSetupBtnPillText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  faceActiveBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0FDF4",
+    borderRadius: 18,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+    marginBottom: 16,
+  },
+  faceActiveIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#DCFCE7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  faceActiveTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#166534",
+  },
+  faceActiveSub: {
+    fontSize: 11,
+    color: "#15803D",
+    marginTop: 1,
+  },
+  faceReEnrollText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#00B050",
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
   idQuickCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -755,5 +1164,16 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#64748B",
     marginTop: 2,
+  },
+  taskBadge: {
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 7,
+    paddingVertical: 1.5,
+    borderRadius: 8,
+  },
+  taskBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#00B050",
   },
 });
